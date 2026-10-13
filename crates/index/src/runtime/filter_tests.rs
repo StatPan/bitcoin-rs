@@ -19,6 +19,20 @@ fn at(tip: &TipSnapshot) -> IndexWatermark {
     }
 }
 
+#[test]
+fn mixed_coinbase_only_backfill_needs_no_undo_or_retry() {
+    let fixture = ForkFixture::new(4);
+    let tip = fixture.tip(fixture.a[2]);
+    let harness = Harness::with_enabled(&fixture, u32::MAX, with_filters());
+    harness.set_tip(&tip);
+    harness.settle(&mut None);
+    let marks = harness.watermarks();
+    assert_eq!(marks.tx_lookup, Some(at(&tip)));
+    assert_eq!(marks.script_history, Some(at(&tip)));
+    assert_eq!(marks.compact_filter, Some(at(&tip)));
+    assert!(harness.runtime.compact_filter_unavailable().is_none());
+}
+
 /// Drives only enough passes to establish sibling readiness, allowing the
 /// deliberately unavailable filter capability to remain stalled.
 fn settle_siblings(harness: &Harness, target: IndexWatermark) {

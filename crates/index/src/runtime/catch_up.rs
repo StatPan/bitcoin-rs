@@ -205,7 +205,7 @@ impl Worker {
             match self.live_anchor(identity.height, identity.hash) {
                 Ok(anchor) => anchors.push(anchor),
                 Err(DerivedIndexWorkerError::UndoUnavailable { .. })
-                    if capabilities == IndexCapabilities::COMPACT_FILTER =>
+                    if !capabilities.contains(IndexCapability::ScriptLive) =>
                 {
                     // Coinbase-only blocks need no undo. Preparation still
                     // fails closed when an external input needs an absent script.

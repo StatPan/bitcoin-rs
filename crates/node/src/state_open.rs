@@ -258,6 +258,8 @@ impl NodeState {
             }
             None => None,
         };
+        // This source owns the legacy "txindex" row. Filter readiness and
+        // failures are reported separately through CompactFilterQuery.
         let derived_index_status =
             Arc::new(bitcoin_rs_index::runtime::DerivedIndexCapability::new(
                 derived_index_parts

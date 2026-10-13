@@ -87,6 +87,10 @@ const BLOCK_SERIALIZED_SIZE: usize = crate::peer::MAX_BLOCK_SERIALIZED_SIZE_USIZ
 /// Full framed-wire bytes reserved before loading a worst-case block body.
 const BLOCK_PRODUCTION_RESERVE_BYTES: usize = crate::wire::HEADER_LEN + BLOCK_SERIALIZED_SIZE;
 
+// Filter type, block hash and maximum CompactSize prefix. Framing is already
+// charged by BLOCK_PRODUCTION_RESERVE_BYTES.
+const CFILTER_PAYLOAD_OVERHEAD_MAX: usize = 1 + 32 + 9;
+
 const _: () = assert!(OUTBOUND_QUEUE_MAX_BYTES > 15 * BLOCK_PRODUCTION_RESERVE_BYTES);
 
 /// Maximum unsolicited block bodies one connection may hold in the shared
@@ -222,7 +226,7 @@ impl OutboundBudget {
                     .pending_bytes
                     .load(Ordering::Acquire)
                     .saturating_add(self.block_reserve)
-                    .saturating_add(42)
+                    .saturating_add(CFILTER_PAYLOAD_OVERHEAD_MAX)
                     <= self.max_bytes)
     }
 
@@ -757,6 +761,26 @@ mod tests {
         assert!(!budget.has_block_production_headroom());
         budget.release(reserve);
         assert!(budget.has_block_production_headroom());
+    }
+
+    #[test]
+    fn filter_headroom_counts_framing_once_and_preserves_queue_limits() {
+        let reserve = super::BLOCK_PRODUCTION_RESERVE_BYTES;
+        let filter_envelope = 1 + 32 + 9;
+        let exact =
+            super::OutboundBudget::with_block_reserve(2, 1 + reserve + filter_envelope, reserve);
+        assert!(exact.admit(1));
+        assert!(exact.has_filter_production_headroom());
+
+        let short =
+            super::OutboundBudget::with_block_reserve(2, reserve + filter_envelope, reserve);
+        assert!(short.admit(1));
+        assert!(!short.has_filter_production_headroom());
+
+        let small = super::OutboundBudget::with_block_reserve(1, 1, reserve);
+        assert!(small.has_filter_production_headroom());
+        assert!(small.admit(1));
+        assert!(!small.has_filter_production_headroom());
     }
 
     #[test]

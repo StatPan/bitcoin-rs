@@ -153,6 +153,27 @@ fn derived_index_status_answers_when_disabled() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[test]
+fn filters_only_do_not_enable_the_legacy_txindex_status() -> anyhow::Result<()> {
+    use bitcoin_rs_index::CapabilityState;
+
+    let dir = tempfile::tempdir()?;
+    let mut config = crate::NodeConfig::default_for_network(crate::Network::Regtest);
+    config.data_dir = dir.path().join("node");
+    config.p2p.listen.clear();
+    config.indexes.txindex = false;
+    config.indexes.script_index = crate::config::ScriptIndexMode::Disabled;
+    config.indexes.block_filter_index = true;
+    let state = NodeState::open(config, None)?;
+
+    assert!(state.compact_filter_query().is_some());
+    let status = state.derived_index_status().capability();
+    assert_eq!(status.id, "txindex");
+    assert!(!status.enabled);
+    assert_eq!(status.state, CapabilityState::Disabled);
+    Ok(())
+}
+
 /// Bounded shutdown turns `Running` into `Stopped`, is idempotent, and
 /// leaves the store released for a clean reopen on the same data dir.
 #[test]

@@ -268,7 +268,13 @@ trait CoreValue {
 
 impl CoreValue for Option<BlockFilterIndexMode> {
     fn apply(value: &str, slot: &mut Self) {
-        *slot = parse_block_filter_index(value).ok();
+        *slot = match parse_block_filter_index(value) {
+            Ok(mode) => Some(mode),
+            Err(error) => {
+                eprintln!("bitcoin.conf: ignoring {error}");
+                None
+            }
+        };
     }
 }
 
@@ -449,6 +455,19 @@ listen=0
         let layers = parse_for_network("dbcache=large\nrest=maybe\n", Network::Regtest);
         assert_eq!(layers[0].storage.dbcache_mb, None);
         assert_eq!(layers[0].rpc.rest, None);
+    }
+
+    #[test]
+    fn invalid_core_filter_type_is_not_enabled() {
+        use super::{BlockFilterIndexMode, CoreValue, parse_block_filter_index};
+
+        let mut value = Some(BlockFilterIndexMode::Basic);
+        CoreValue::apply("basci", &mut value);
+        assert_eq!(value, None);
+        assert_eq!(
+            parse_block_filter_index("basci"),
+            Err("invalid blockfilterindex value `basci`: expected `basic` or a boolean".into())
+        );
     }
 }
 
