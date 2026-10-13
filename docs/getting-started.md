@@ -72,6 +72,7 @@ Important defaults:
 | pruning | off |
 | txindex | off |
 | scriptindex | off |
+| blockfilterindex / peerblockfilters | off / off |
 | fast sync | off |
 | metrics listener | off |
 | mining payout | unset |
@@ -81,6 +82,37 @@ Change the default RPC credentials before exposing the port.
 `--txindex` is the explicit Core-compatible txindex promise. `--scriptindex=utxo` enables the live script view; `--scriptindex=full` also enables confirmed script history. `--rest=true` enables the unauthenticated Core REST routes on the RPC listener.
 
 `--fast-sync` (also `BITCOIN_RS_FAST_SYNC` or `fast_sync` in TOML) relaxes the block-download policy: the node targets 32 full-relay outbound peers instead of 8 (its two block-relay-only slots are unchanged), fans block requests out as soon as two eligible outbound peers are connected instead of eight, and divides the 256-block download window across the eligible peers with a floor of 8 blocks per peer instead of 16 (two peers get 128 each; the 8-block floor is reached at 32 peers). Consensus validation is unchanged. The mode is opt-in and its throughput has not been measured against the default.
+
+## Compact block filters
+
+`--blockfilterindex=basic` enables the optional BIP158 basic-filter index;
+`--peerblockfilters` additionally enables BIP157 serving. Both default off,
+independently of transaction and script indexes. Serving requires the filter
+index, and filter indexing currently rejects pruning configurations.
+
+```sh
+./target/release/bitcoin-rs --network regtest --data-dir .bitcoin-rs-filters \
+  --blockfilterindex=basic --peerblockfilters
+```
+
+The equivalent `bitcoin.conf` settings are `blockfilterindex=basic` and
+`peerblockfilters=1`; TOML uses `blockfilterindex = "basic"` and
+`peerblockfilters = true`. Environment overrides are
+`BITCOIN_RS_BLOCKFILTERINDEX=basic` and `BITCOIN_RS_PEERBLOCKFILTERS=true`.
+
+`getindexinfo` reports `basic block filter index` with `synced` and
+`best_block_height`. `getblockfilter <blockhash> [basic]` returns the serialized
+filter and chained header, or an explicit unavailable/not-found error. The
+P2P service bit is advertised on new handshakes only while the configured index
+is ready. Backfill requires retained blocks and spent-output undo scripts;
+missing history never creates a synthetic filter prefix.
+
+Restart resumes the durable cursor; late enablement backfills from genesis.
+Disabling filters preserves their data, and reorgs retain immutable stale-branch
+records while rewinding the active cursor. Retention has no total disk cap, so
+operators must budget additional index storage. See
+[the indexing contract](contracts/indexing.md#idx-11-optional-bip158-filters-and-immutable-bip157-commitments)
+for ownership and failure behavior.
 
 ## Check progress
 

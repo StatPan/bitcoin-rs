@@ -17,7 +17,10 @@ fn script_index_capabilities_match_the_storage_contract() {
     );
 
     config.indexes.script_index = crate::config::ScriptIndexMode::Full;
-    assert_eq!(derived_index_capabilities(&config), IndexCapabilities::ALL);
+    assert_eq!(
+        derived_index_capabilities(&config),
+        IndexCapabilities::TX_SCRIPT
+    );
 
     config.indexes.txindex = true;
     config.indexes.script_index = crate::config::ScriptIndexMode::Disabled;
@@ -34,6 +37,24 @@ fn script_index_capabilities_match_the_storage_contract() {
 }
 
 #[test]
+fn filters_add_only_the_explicit_optional_capability() {
+    let mut config = crate::NodeConfig::default_for_network(crate::Network::Regtest);
+    assert_eq!(derived_index_capabilities(&config), IndexCapabilities::NONE);
+    config.indexes.block_filter_index = true;
+    assert_eq!(
+        derived_index_capabilities(&config),
+        IndexCapabilities::COMPACT_FILTER
+    );
+    config.indexes.script_index = crate::config::ScriptIndexMode::Full;
+    assert_eq!(derived_index_capabilities(&config), IndexCapabilities::ALL);
+    config.indexes.block_filter_index = false;
+    assert_eq!(
+        derived_index_capabilities(&config),
+        IndexCapabilities::TX_SCRIPT
+    );
+}
+
+#[test]
 fn open_skips_tx_index_when_disabled() -> anyhow::Result<()> {
     let dir = tempfile::tempdir()?;
     let mut config = crate::NodeConfig::default_for_network(crate::Network::Regtest);
@@ -42,6 +63,7 @@ fn open_skips_tx_index_when_disabled() -> anyhow::Result<()> {
     let state = NodeState::open(config, None)?;
 
     assert!(state.chain_followers().derived_index().is_none());
+    assert!(state.compact_filter_query().is_none());
     assert!(
         state.derived_index_query().is_none(),
         "txindex disabled by default"

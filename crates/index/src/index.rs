@@ -3,6 +3,7 @@
 mod block;
 mod capability;
 mod error;
+mod filter;
 mod prepared;
 mod reader;
 mod resolve;
@@ -15,6 +16,7 @@ pub(crate) use block::NoSpentScripts;
 pub use block::{MAX_LIVE_SCRIPT_SIZE, SpentCoinScripts};
 pub use capability::{IndexCapabilities, IndexCapability, IndexWatermark, IndexWatermarks};
 pub use error::IndexError;
+pub use filter::{CompactFilterMetadata, CompactFilterRecord};
 pub use prepared::{PreparedBatch, PreparedBatchLimits, PreparedBlock};
 pub use reader::Indexer;
 pub use resolve::{BlockSource, ScriptHistoryEntry};

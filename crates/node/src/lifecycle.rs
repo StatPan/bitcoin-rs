@@ -77,7 +77,6 @@ fn rpc_network_handles(state: &NodeState) -> NetworkHandles {
     NetworkHandles {
         peer_table: state.peer_table(),
         p2p: state.p2p(),
-        local_services: state.p2p().local_services().to_u64(),
     }
 }
 
@@ -156,6 +155,7 @@ fn bind_rpc(
         },
         indexes: IndexHandles {
             derived_index: state.derived_index_query(),
+            compact_filter: state.compact_filter_query(),
             esplora_tx_index: None,
             script_index: state.script_index_query(),
             derived_index_status: Some(state.derived_index_status()),

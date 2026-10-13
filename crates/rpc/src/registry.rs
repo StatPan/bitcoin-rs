@@ -11,7 +11,7 @@ use sonic_rs::Value;
 
 use crate::context::Context;
 use crate::error::RpcError;
-use crate::handlers::{chain, deployment, mempool, mining, network, tx, util};
+use crate::handlers::{chain, deployment, filters, mempool, mining, network, tx, util};
 use crate::manifest::{CORE_VERSION, Entry, NO_WALLET, Status, SurfaceKind};
 
 /// Signature of one dispatch arm.
@@ -213,7 +213,7 @@ declare_rows! {
 
     // -- JSON-RPC: additional Core blockchain/control surfaces ------
     "dumptxoutset", SurfaceKind::Rpc, Status::Unimplemented, "", CORE_VERSION, "UTXO snapshot dump not implemented.", "n/a", None;
-    "getblockfilter", SurfaceKind::Rpc, Status::Unimplemented, "", CORE_VERSION, "BIP157/158 compact block filters and the filter index are not implemented.", "n/a", None;
+    "getblockfilter", SurfaceKind::Rpc, Status::ImplementedUnverified, "", CORE_VERSION, "Requires the optional basic block filter index. Serves exact stored filter bytes and headers; unavailable coverage fails explicitly.", "0.14.0", Some(filters::getblockfilter);
     "getblockfrompeer", SurfaceKind::Rpc, Status::Unimplemented, "", CORE_VERSION, "No on-demand block fetch from peers.", "n/a", None;
     "getchainstates", SurfaceKind::Rpc, Status::Deviation, "", CORE_VERSION, "Reports coherent active/historical lifecycle with transaction-based progress; omits Core cache/difficulty fields and unavailable progress. Returns -32603 instead of waiting when lifecycle work is busy; ordinary chain-transition reads may still wait. Historical role precedes active. See API-33, crates/node/src/snapshot.rs and crates/rpc/src/handlers/chain.rs.", "0.12.0", Some(chain::getchainstates);
     "getdeploymentinfo", SurfaceKind::Rpc, Status::Deviation, "", CORE_VERSION, "Reports actual native activation: CSV/Segwit use historical BIP9 on mainnet/testnet3; Taproot is height-based and testdummy is absent. Native regtest heights and historical script flags differ from Core 31.1; off-header-chain queries have a 2,000,000-ancestor budget. See docs/contracts/external-api.md#native-deployment-reporting.", "0.12.0", Some(deployment::getdeploymentinfo);
@@ -224,7 +224,7 @@ declare_rows! {
     "preciousblock", SurfaceKind::Rpc, Status::Unimplemented, "", CORE_VERSION, "No manual block-preference surface.", "n/a", None;
     "reconsiderblock", SurfaceKind::Rpc, Status::Unimplemented, "", CORE_VERSION, "No manual reorg-control surface.", "n/a", None;
     "savemempool", SurfaceKind::Rpc, Status::Unimplemented, "", CORE_VERSION, "Mempool dump/reload persistence not implemented.", "n/a", None;
-    "scanblocks", SurfaceKind::Rpc, Status::Unimplemented, "", CORE_VERSION, "No BIP157/158 filter index to scan.", "n/a", None;
+    "scanblocks", SurfaceKind::Rpc, Status::Unimplemented, "", CORE_VERSION, "Compact-filter scanning is not implemented.", "n/a", None;
     "waitforblock", SurfaceKind::Rpc, Status::Deviation, "", CORE_VERSION, "Durable active-tip waits. Timeout, cancellation, shutdown and recovery closure may return a durable in-progress reorg prefix. Arity errors retain Core -1 with concise usage rather than the full help body. Bounded admission returns -1 when full; wait responses close HTTP keep-alive. See docs/contracts/external-api.md#api-34-active-tip-waits.", "0.13.0", Some(crate::handlers::wait::waitforblock), Blocking;
     "waitforblockheight", SurfaceKind::Rpc, Status::Deviation, "", CORE_VERSION, "Durable active-tip waits. Timeout, cancellation, shutdown and recovery closure may return a durable in-progress reorg prefix. Arity errors retain Core -1 with concise usage rather than the full help body. Bounded admission returns -1 when full; wait responses close HTTP keep-alive. See docs/contracts/external-api.md#api-34-active-tip-waits.", "0.13.0", Some(crate::handlers::wait::waitforblockheight), Blocking;
     "waitfornewblock", SurfaceKind::Rpc, Status::Deviation, "", CORE_VERSION, "Durable active-tip waits. Timeout, cancellation, shutdown and recovery closure may return a durable in-progress reorg prefix. Arity errors retain Core -1 with concise usage rather than the full help body. Bounded admission returns -1 when full; wait responses close HTTP keep-alive. See docs/contracts/external-api.md#api-34-active-tip-waits.", "0.13.0", Some(crate::handlers::wait::waitfornewblock), Blocking;

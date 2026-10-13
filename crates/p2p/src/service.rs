@@ -367,6 +367,7 @@ impl From<Arc<RwLock<Vec<crate::BannedSubnet>>>> for BannedReader {
 /// The sole runtime owner of P2P control state and workers.
 pub struct P2pService {
     config: P2pServiceConfig,
+    compact_filters: Option<Arc<dyn bitcoin_rs_index::query_api::CompactFilterQuery>>,
     shutdown: bitcoin_rs_chain::LatchReader,
     worker_shutdown: Arc<AtomicBool>,
     network_active: Arc<AtomicBool>,
@@ -419,6 +420,7 @@ impl P2pService {
         );
         Self {
             config,
+            compact_filters: None,
             address_book,
             shutdown: shutdown.into(),
             worker_shutdown: Arc::new(AtomicBool::new(false)),
@@ -435,6 +437,17 @@ impl P2pService {
             inbound_blocks_rx: Mutex::new(Some(inbound_blocks_rx)),
             workers: Mutex::new(None),
         }
+    }
+
+    /// Attaches the optional basic-filter query before starting this service.
+    /// `None` preserves the default disabled serving path without a lock or query.
+    #[must_use]
+    pub fn with_compact_filters(
+        mut self,
+        filters: Option<Arc<dyn bitcoin_rs_index::query_api::CompactFilterQuery>>,
+    ) -> Self {
+        self.compact_filters = filters;
+        self
     }
 
     /// Starts listeners, outbound connection draining, and peer bootstrap.
@@ -476,6 +489,7 @@ impl P2pService {
             self.inbound_headers_tx.clone(),
             self.inbound_blocks_tx.clone(),
             chain_query.cloned(),
+            self.compact_filters.clone(),
             sync_wake_tx.cloned(),
             extras,
         );
@@ -859,7 +873,10 @@ impl P2pService {
     /// `init.cpp:2022-2026`): what RPC reports as `localservices`.
     #[must_use]
     pub fn local_services(&self) -> bitcoin::p2p::ServiceFlags {
-        self.config.local_services
+        crate::compact_filters::local_services(
+            self.config.local_services,
+            self.compact_filters.as_deref(),
+        )
     }
 
     /// Returns whether P2P network activity is enabled.
@@ -1888,6 +1905,35 @@ mod tests {
     use std::net::{Ipv4Addr, SocketAddr, TcpListener};
 
     #[test]
+    fn local_services_follow_live_filter_readiness() {
+        let base = ServiceFlags::WITNESS | ServiceFlags::NETWORK_LIMITED | ServiceFlags::P2P_V2;
+        let service = P2pService::new(
+            P2pServiceConfig {
+                local_services: base,
+                ..P2pServiceConfig::default()
+            },
+            Arc::new(AtomicBool::new(false)),
+        );
+        assert_eq!(service.local_services(), base);
+        let filters = Arc::new(crate::compact_filters::tests::Filters::default());
+        let service = service.with_compact_filters(Some(filters.clone()));
+        assert_eq!(
+            service.local_services(),
+            base | ServiceFlags::COMPACT_FILTERS
+        );
+        filters.synced.store(false, Ordering::Relaxed);
+        assert_eq!(service.local_services(), base);
+        filters.synced.store(true, Ordering::Relaxed);
+        filters.failed.store(true, Ordering::Relaxed);
+        assert_eq!(service.local_services(), base);
+        filters.failed.store(false, Ordering::Relaxed);
+        assert_eq!(
+            service.local_services(),
+            base | ServiceFlags::COMPACT_FILTERS
+        );
+    }
+
+    #[test]
     fn feeler_poisson_delay_matches_actual_core_uniform_vectors() {
         let data: serde_json::Value =
             serde_json::from_str(include_str!("../tests/data/core-poisson-v31.1.json"))
@@ -2763,6 +2809,7 @@ mod tests {
             blocks,
             None,
             None,
+            None,
             crate::listener::ListenerExtras::default(),
         );
         let mut active = HashMap::new();
@@ -2942,6 +2989,7 @@ mod tests {
             Magic::REGTEST,
             headers,
             blocks,
+            None,
             None,
             None,
             crate::listener::ListenerExtras::default(),
@@ -3265,6 +3313,7 @@ mod tests {
             blocks,
             None,
             None,
+            None,
             crate::listener::ListenerExtras::default(),
         );
         shared.address_book = Some(Arc::clone(book));
@@ -3523,6 +3572,7 @@ mod tests {
                 crossbeam_channel::bounded(1).0,
                 None,
                 None,
+                None,
                 crate::listener::ListenerExtras::default(),
             );
             shared.address_book = Some(Arc::clone(&book));
@@ -3760,6 +3810,7 @@ mod tests {
                 crossbeam_channel::bounded(1).0,
                 Some(query),
                 None,
+                None,
                 crate::listener::ListenerExtras::default(),
             );
             shared.address_book = Some(Arc::clone(&book));
@@ -3890,6 +3941,7 @@ mod tests {
             crossbeam_channel::bounded(1).0,
             crossbeam_channel::bounded(1).0,
             Some(query),
+            None,
             None,
             crate::listener::ListenerExtras::default(),
         );

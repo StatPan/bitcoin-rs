@@ -1155,45 +1155,44 @@ pub(crate) fn gettxoutsetinfo(ctx: &Arc<Context>, params: &Value) -> Result<Valu
 }
 
 pub(crate) fn getindexinfo(ctx: &Arc<Context>, params: &Value) -> Result<Value, RpcError> {
-    let index_name = if params.is_null() {
-        None
-    } else if let Some(array) = params.as_array() {
-        if array.is_empty() {
-            None
-        } else {
-            Some(required_str(params, 0, "index_name must be a string")?.to_owned())
-        }
-    } else {
-        return Err(RpcError::InvalidParams("params must be null or array"));
-    };
+    const BASIC_INDEX: &str = "basic block filter index";
 
-    let txindex_entry = ctx
-        .indexes
-        .derived_index
-        .as_ref()
-        .map(|derived_index| derived_index.index_info())
-        .transpose()?;
-    let txindex_entry = txindex_entry.map(|info| v31::GetIndexInfoName {
-        synced: info.synced,
-        best_block_height: info.best_block_height,
-    });
+    let params = super::bind_named_params(params, &["index_name"])?;
+    super::ensure_at_most_params(&params, 1)?;
+    let index_name = params
+        .get(0)
+        .filter(|value| !value.is_null())
+        .map(|_| required_str(&params, 0, "index_name must be a string"))
+        .transpose()?
+        .filter(|name| !name.is_empty());
     let mut indexes = alloc::collections::BTreeMap::new();
-    if let Some(entry) = txindex_entry {
-        indexes.insert("txindex".to_owned(), entry);
+    if index_name.is_none_or(|name| name == "txindex")
+        && let Some(index) = &ctx.indexes.derived_index
+    {
+        let info = index.index_info()?;
+        indexes.insert(
+            "txindex".to_owned(),
+            v31::GetIndexInfoName {
+                synced: info.synced,
+                best_block_height: info.best_block_height,
+            },
+        );
     }
     // Core answers a named request with only that index; an unknown name
     // yields an empty object, as does a name for a disabled index.
-    let selected = match index_name {
-        None => indexes,
-        Some(name) => {
-            let mut selected = alloc::collections::BTreeMap::new();
-            if let Some(entry) = indexes.remove(&name) {
-                selected.insert(name, entry);
-            }
-            selected
-        }
-    };
-    typed_to_sonic(&v31::GetIndexInfo(selected))
+    if index_name.is_none_or(|name| name == BASIC_INDEX)
+        && let Some(index) = &ctx.indexes.compact_filter
+    {
+        let info = index.filter_index_info()?;
+        indexes.insert(
+            BASIC_INDEX.to_owned(),
+            v31::GetIndexInfoName {
+                synced: info.synced,
+                best_block_height: info.best_block_height,
+            },
+        );
+    }
+    typed_to_sonic(&v31::GetIndexInfo(indexes))
 }
 
 /// bitcoin-rs extension `getcapabilities`.

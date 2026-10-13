@@ -10,9 +10,10 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result};
 use bitcoin_rs_chainstate::ValidationMode;
+use bitcoin_rs_node::config::BlockFilterIndexMode;
 use bitcoin_rs_node::options::{
-    parse_connect_endpoint, parse_network, parse_p2p_magic, parse_script_index,
-    parse_storage_backend, parse_validation_engine, parse_validation_mode,
+    parse_block_filter_index, parse_connect_endpoint, parse_network, parse_p2p_magic,
+    parse_script_index, parse_storage_backend, parse_validation_engine, parse_validation_mode,
 };
 use bitcoin_rs_node::{
     ChainstateJournalOverrides, IndexOverrides, MiningOverrides, Network, NetworkSelection,
@@ -265,6 +266,12 @@ trait CoreValue {
     fn apply(value: &str, slot: &mut Self);
 }
 
+impl CoreValue for Option<BlockFilterIndexMode> {
+    fn apply(value: &str, slot: &mut Self) {
+        *slot = parse_block_filter_index(value).ok();
+    }
+}
+
 impl CoreValue for Option<bool> {
     fn apply(value: &str, slot: &mut Self) {
         *slot = parse_core_bool(value);
@@ -383,6 +390,57 @@ listen=0
             Some(Path::new("/tmp/.cookie"))
         );
         assert_eq!(global.p2p.listen, Some(Vec::new()));
+    }
+
+    #[test]
+    fn compact_filter_options_share_the_basic_type_across_input_surfaces() -> anyhow::Result<()> {
+        use super::{BlockFilterIndexMode, CliArgs};
+        use clap::Parser as _;
+        let cli = CliArgs::try_parse_from([
+            "bitcoin-rs",
+            "--blockfilterindex=basic",
+            "--peerblockfilters",
+        ])?;
+        let cli = cli.into_user_config();
+        assert_eq!(
+            cli.indexes.block_filter_index,
+            Some(BlockFilterIndexMode::Basic)
+        );
+        assert_eq!(cli.p2p.peer_block_filters, Some(true));
+        let core = parse_for_network(
+            "blockfilterindex=basic\npeerblockfilters=1\n",
+            Network::Regtest,
+        );
+        assert_eq!(
+            core[0].indexes.block_filter_index,
+            cli.indexes.block_filter_index
+        );
+        assert_eq!(core[0].p2p.peer_block_filters, cli.p2p.peer_block_filters);
+        let env = super::user_config_from_env(
+            [
+                ("BITCOIN_RS_BLOCKFILTERINDEX".into(), "basic".into()),
+                ("BITCOIN_RS_PEERBLOCKFILTERS".into(), "true".into()),
+            ]
+            .into_iter(),
+        )?;
+        assert_eq!(
+            env.indexes.block_filter_index,
+            cli.indexes.block_filter_index
+        );
+        let toml: bitcoin_rs_node::UserConfig =
+            toml::from_str("blockfilterindex = \"basic\"\npeerblockfilters = true\n")?;
+        assert_eq!(
+            toml.indexes.block_filter_index,
+            cli.indexes.block_filter_index
+        );
+        assert_eq!(toml.p2p.peer_block_filters, cli.p2p.peer_block_filters);
+        assert!(CliArgs::try_parse_from(["bitcoin-rs", "--blockfilterindex=extended"]).is_err());
+        let bare = CliArgs::try_parse_from(["bitcoin-rs", "--blockfilterindex"])?;
+        assert_eq!(
+            bare.into_user_config().indexes.block_filter_index,
+            Some(BlockFilterIndexMode::Basic)
+        );
+        Ok(())
     }
 
     /// A number the file states in a form Core cannot read sets nothing.

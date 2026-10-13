@@ -120,6 +120,59 @@ impl Worker {
             .map_err(DerivedIndexWorkerError::RollbackEvidence)
     }
 
+    /// Rewinds immutable filters without requesting body or undo history.
+    fn rollback_filter(
+        &self,
+        fence: IndexWriteFence,
+        watermarks: IndexWatermarks,
+        watermark: IndexWatermark,
+    ) -> Result<Option<IndexWatermark>, DerivedIndexWorkerError> {
+        let watermark_hash = Hash256::from_le_bytes(&watermark.hash);
+        let prev = if watermark.height == 0 {
+            None
+        } else {
+            let tree = self.block_tree.read();
+            let id = tree.lookup(watermark_hash).ok_or(
+                crate::IndexError::CompactFilterChainUnavailable {
+                    height: watermark.height,
+                    hash: watermark.hash,
+                },
+            )?;
+            let parent = tree.parent_id(id).ok().flatten().ok_or(
+                crate::IndexError::CompactFilterChainUnavailable {
+                    height: watermark.height,
+                    hash: watermark.hash,
+                },
+            )?;
+            let parent = tree.node(parent).map_err(|_| {
+                crate::IndexError::CompactFilterChainUnavailable {
+                    height: watermark.height,
+                    hash: watermark.hash,
+                }
+            })?;
+            Some(IndexWatermark {
+                height: parent.height,
+                hash: parent.hash.to_le_bytes(),
+            })
+        };
+        if self.runtime.should_stop() {
+            return Err(DerivedIndexWorkerError::Stopped);
+        }
+        let cursor = self.cursor_for_result(IndexCapabilities::COMPACT_FILTER, prev, watermarks);
+        self.writer
+            .commit_compact_filter_rollback_with_cursor(
+                fence,
+                prev,
+                cursor
+                    .as_ref()
+                    .map_or(ConsumerCursorUpdate::Clear, |bytes| {
+                        ConsumerCursorUpdate::Set(bytes.as_slice())
+                    }),
+            )
+            .map_err(DerivedIndexWorkerError::Index)?;
+        Ok(prev)
+    }
+
     /// Rolls back one complete block for every selected capability.
     pub(super) fn rollback_one(
         &self,
@@ -129,6 +182,9 @@ impl Worker {
         watermark: IndexWatermark,
     ) -> Result<Option<IndexWatermark>, DerivedIndexWorkerError> {
         let watermark_hash = Hash256::from_le_bytes(&watermark.hash);
+        if capabilities == IndexCapabilities::COMPACT_FILTER {
+            return self.rollback_filter(fence, watermarks, watermark);
+        }
         // One grant covers every persistence read this rollback needs: a
         // prune pass may not delete the undo row in the gap between the
         // body load and the live-anchor lookup.

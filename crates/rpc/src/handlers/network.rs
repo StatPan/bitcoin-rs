@@ -111,6 +111,7 @@ pub(crate) fn getnetworkinfo(ctx: &Arc<Context>, params: &Value) -> Result<Value
     let inbound = peers.iter().filter(|p| p.inbound).count();
     let outbound = total.saturating_sub(inbound);
     let network_active = ctx.network.p2p.network_active();
+    let local_services = ctx.network.p2p.local_services().to_u64();
     let networks = [
         ("ipv4", false, true),
         ("ipv6", false, true),
@@ -129,8 +130,8 @@ pub(crate) fn getnetworkinfo(ctx: &Arc<Context>, params: &Value) -> Result<Value
         version: usize::try_from(bitcoin_rs_primitives::client_version()).unwrap_or(usize::MAX),
         subversion: USER_AGENT.to_owned(),
         protocol_version: 70016,
-        local_services: format!("{:016x}", ctx.network.local_services),
-        local_services_names: bitcoin_rs_p2p::service_flag_names(ctx.network.local_services)
+        local_services: format!("{local_services:016x}"),
+        local_services_names: bitcoin_rs_p2p::service_flag_names(local_services)
             .into_iter()
             .map(str::to_owned)
             .collect(),

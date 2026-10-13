@@ -105,6 +105,10 @@ impl Worker {
                 tracing::debug!("index CAS lost with unchanged reset; re-deriving");
                 return Ok(None);
             }
+            Err(error) if error.is_compact_filter_error() => {
+                self.runtime.block_compact_filters(error.to_string(), false);
+                return Ok(None);
+            }
             Err(error) => return Err(DerivedIndexWorkerError::Index(error)),
         };
         Ok(Some(watermark))

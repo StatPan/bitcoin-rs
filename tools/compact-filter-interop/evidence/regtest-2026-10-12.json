@@ -1,0 +1,357 @@
+{
+  "artifacts": {
+    "candidate": {
+      "sha256": "fcb8e6853460c7925d1403a7e3695c0178e2a77e2f26a7402c54a81ea750f75f"
+    },
+    "client": {
+      "sha256": "4db7c885a89358c6c13fc0a7839a6c7d9dabca6cb0c98ed67e6ee11fbe701c38"
+    },
+    "core": {
+      "sha256": "986e63b3c8770f08d0059820ad3dd085d1ab9e1bea23946c243f858a06888a08"
+    },
+    "scripts/p2p_compact_filter_probe.py": {
+      "sha256": "069584e81c914b7c56db7b4410298867fa6ff8507cb3466f3a5c9be3af9721ef"
+    },
+    "scripts/run-compact-filter-interop.py": {
+      "sha256": "e87ebb077d3efa94ca9e6f178bf8830d264c82cf55a61ac22d7b16e1df697e01"
+    },
+    "tools/compact-filter-interop/Cargo.lock": {
+      "sha256": "2e23050e0ef340e8eb362359567d7f51022650ae28cdf9c2649cb5adf8326054"
+    },
+    "tools/compact-filter-interop/Cargo.toml": {
+      "sha256": "b4a0c4cff245e35fcb88a052240b711b39f67080c066877143c691c340b1789c"
+    },
+    "tools/compact-filter-interop/src/main.rs": {
+      "sha256": "00c9dcf1f46cafb89d47b0db42956219a7407ee2b88e996fe4698505dd0aec68"
+    }
+  },
+  "bounded_run_resource_observations": {
+    "children_cpu_system_seconds": 8.99,
+    "children_cpu_user_seconds": 15.69,
+    "elapsed_seconds": 224.5,
+    "exit_code": 0,
+    "max_process_rss_kib": 146684,
+    "max_target_bytes": 1971335168,
+    "min_free_bytes": 27308765184,
+    "min_memavailable_bytes": 7877906432,
+    "raw_wrapper_record_sha256": "99930d236caf231e01fff69f7c6d9b7fba40cf25b1e81989444630fa9b4c03f9",
+    "scope": "External bounded wrapper observations for the complete runner process group, including Core, candidate and client; not candidate-only CPU/RSS or a matched overhead benchmark."
+  },
+  "build": {
+    "backend": "Fjall",
+    "candidate_command": "cargo +1.99.0 build --locked --profile test -p bitcoin-rs --no-default-features --features fjall",
+    "candidate_dbcache_mib": 64,
+    "cargo_build_jobs": 1,
+    "client_command": "cargo +1.99.0 build --locked --manifest-path tools/compact-filter-interop/Cargo.toml",
+    "debug_information": 0,
+    "incremental": false,
+    "rust": "1.99.0",
+    "validation": "native"
+  },
+  "changed_source_sha256": {
+    "Cargo.lock": "0b788f4f69e4fff7108276d4b72c5069a09ed61f16c0f32cf095bb2bc2f720a7",
+    "bin/bitcoin-rs/src/config.rs": "440c34fa935233c109c1fd3b164bf809fc20638e7da41f1082336c08439afdff",
+    "bin/bitcoin-rs/tests/gates/g17_dependency_direction.rs": "8545c96bf1f184204b04ced10fbe81660c6f6134e41a67994235015c7025226e",
+    "crates/index/Cargo.toml": "af35be41a85d691cca2bcd1cb946444776c78d8174adb270610facdb33d76f6a",
+    "crates/index/src/compact_filter.rs": "5ad3aeab5c64bfa96becf7106545b5c3f0c2c575e0700a0e27236c489c692860",
+    "crates/index/src/index.rs": "5629f9115f888a10e05704ea659b3aba0af73101cf913f7636a0ac16eaf7793c",
+    "crates/index/src/index/block.rs": "ff6b2ef044c0c7a419727a6c8cf646d9530f66eebb0c80c43f919fc629ff2bf8",
+    "crates/index/src/index/capability.rs": "43b90954e0e5a49ee284be6ddc14dd514f458328b9469ae9c4b96743ae982cdb",
+    "crates/index/src/index/error.rs": "b49c727b505bc1f512c366a9d18e59d452e20f901c5cd23844e5fd2dd40d71a1",
+    "crates/index/src/index/filter.rs": "28ad76e42438610264c429c930c3f8778a98085ffea58fa98cf8702cf1a7a45a",
+    "crates/index/src/index/prepared.rs": "df46f0f84537a1881133ed34587f1bf767e3e28d7e1fc9b0c39c481fd5c9ecb6",
+    "crates/index/src/index/reader.rs": "e9b5880061c34076e14fc533f379e88e31b8a46ea90081d631fa8d639dad4af3",
+    "crates/index/src/index/snapshot.rs": "72cb1ef0608ac63f3beed091ab1ec9ed17463b355198e98ad1286f513976c932",
+    "crates/index/src/index/state.rs": "c046a2f23c9b6c7a5482d4619e7d6e6cc0dd67ae98d302af97df8f8440f72729",
+    "crates/index/src/index/write.rs": "25684e0f7cbbd0636eb46864a1322115b6cb3657e4ada1180bef5b55a8eeb778",
+    "crates/index/src/lib.rs": "e67873bab72936fb5b65fa8ae03cf38ef942985fda2ac7539f2bf3183611eda9",
+    "crates/index/src/query_api.rs": "bfbb6e0ab12cce9f55a9bf76764d1232744fee79ea8bcb1cea0dac47bf0b32df",
+    "crates/index/src/reconcile.rs": "5c40d2fb0837c5ca41176b7a9529c7fb05fd25627f52565411f90c7082c80475",
+    "crates/index/src/recovery.rs": "2dca2a25c85e96ee24f154a45f74ff8e6986553b27bd2c1a617598106cabf22a",
+    "crates/index/src/runtime.rs": "641e38e6354b8fcbcbafe05b8799da4de280b4b0561b229bdc92e9e14907b301",
+    "crates/index/src/runtime/capability.rs": "644015fddf6f4ba36a496c7962257f1c24f3f0c9d1345050c1ee1a32b44ec3d2",
+    "crates/index/src/runtime/catch_up.rs": "d99cc0083c51c8e05b2401c926bc0a4d41ce8f93c3a4f72d21c4d73f5ffa59a3",
+    "crates/index/src/runtime/cursor.rs": "aa983715ef68edae4c3ad614a66802342b0c96ceacd6389a35e20ef3a97ec7d6",
+    "crates/index/src/runtime/filter_tests.rs": "440a7364963ff4744b4c069d3c031c8fc6c0970220fc0fac13ed969e09813b37",
+    "crates/index/src/runtime/query.rs": "2f5f9fbaf36d611c2768eaa430ad02a06b66b0fe72c941276660156fc66ddc0a",
+    "crates/index/src/runtime/query/filter_tests.rs": "abd05aeaf0f98769af7e7cbc7228fb9cb03f83bc40ec233690b01308212e0bcf",
+    "crates/index/src/runtime/query/filters.rs": "607f9578a5467245c0f687deef79edb4b4326d2e219f729826eda47d7f466f50",
+    "crates/index/src/runtime/query_tests.rs": "45e4cf7ccc0b210d84cb5ebde54c3490675680ee70c2200cc545930413a7169f",
+    "crates/index/src/runtime/reconciliation.rs": "f60a028dbb5ec8b742dda3e109f801216799492803fd70dc240f548a9e20517e",
+    "crates/index/src/runtime/recovery_tests.rs": "808dd86725243b75bf98d579c79c84667a6aefa2af992126af2fd19d2dc49b31",
+    "crates/index/src/runtime/rollback.rs": "d31eed351d4a77e014d92d14d174342e4fb79b73aa042c1d35d838d2d0b060f4",
+    "crates/index/src/writer.rs": "bb3936400d512bb11b41423ec9047b3eda0e201cfd69fd1564339242471fa071",
+    "crates/index/tests/compact_filter.rs": "d14d2af16d6164abf84fde77ed6e3343e033aebf76cb477c6a5b0bbe91ab4c3a",
+    "crates/index/tests/compact_filter_storage.rs": "04df10e5872332336de492f871b00ab64257bc8900682ea4c1ba999a6eb0b460",
+    "crates/index/tests/data/bip158-testnet-19.json": "d9049756f744e561b882a8eff507582fb7cd74ed9cf5542bdac58257449ee2a2",
+    "crates/index/tests/index_roundtrip.rs": "a561192e914350e30515ccc4529295b28c48cdd7ef2ec951a283e95204ce2242",
+    "crates/index/tests/script_live.rs": "1e3f49230dc36b44a1aaa595a5e0ff59cbb9390cc61f1d8153c242323b789756",
+    "crates/node/src/config.rs": "3176ab166a12625ff70e29e81f3c5d3e99617fba5766e6b2d0d483b68cd94f93",
+    "crates/node/src/lifecycle.rs": "7e2b24b232bee1e137484853e7283dccc7467da7f6f8ed32460750c1e062dca4",
+    "crates/node/src/options.rs": "571f373512f6f66b476a3035be18db5a5da5de4452605b6f82f39d440ffc8146",
+    "crates/node/src/state.rs": "915748bd20637f6591f2458e84a3a4c08aeccd80e01afbb357aa1aa19aa7d667",
+    "crates/node/src/state_open.rs": "eadae0abc85a93fc01fd4a5d7a7c289044f771b82418183976f57c4533b16779",
+    "crates/node/tests/mining_e2e.rs": "4ccbbf3efa02bf4476eb5427a07a52092be75586110bc340bba20b92dd9e8585",
+    "crates/node/tests/tx_ingress_e2e.rs": "d95f19b94a8098745b7bbe8b867a6e11c7a220c4da56c58396c5f6b8d7e3d46d",
+    "crates/node/tests/unit/config/tests.rs": "60ab4f9b364245b85f98d637749ad9ed3344f9940be7f5921722c7c8bd422092",
+    "crates/node/tests/unit/lifecycle/tests.rs": "e9ce7cf4abaf96ff5a69d75381825fe52680d046705365c4ce506369ea7b9aab",
+    "crates/node/tests/unit/state/tests/index.rs": "b4140650ca24778ce2cb1a7dd19c0c5dc173fc9febe7c51c057e58eb7d7a2764",
+    "crates/p2p/Cargo.toml": "7cf6d214a7f39761a04aac7de460802d0ab82f2402c936b5e35c31c69068a74f",
+    "crates/p2p/README.md": "3f8bd5c4c9ff07d24c282fb836ed533f62ad0dea32ea4bbd090a81a24e6d254f",
+    "crates/p2p/src/chain_query.rs": "0342c631287e346037ce942110fc6900ff53774f4f2a08c1e5e2913d7d9b09be",
+    "crates/p2p/src/compact_filters.rs": "16ab7184d936d1de49c6a1f8522867bc0615c0a4cc0ab694eba03fdb4b4242e7",
+    "crates/p2p/src/compact_filters/tests.rs": "761e2ce16e67aa97b742832c9baeb1185b0cdb604405627c4691206fbfb66b17",
+    "crates/p2p/src/connection.rs": "65f858e869706108db812be23dc085a39eea92ce45400f9cd3d9f0e7fd53fdc0",
+    "crates/p2p/src/dispatch.rs": "6d3599ff3fc89b85dfe6b2c8142a8d7792f8189721b8dd37780af4e4267f71a3",
+    "crates/p2p/src/lib.rs": "8b32af3a94b1b07267137fcd7bea373f810c598ba544b593b40d1c05e63ca27b",
+    "crates/p2p/src/listener.rs": "317a8fbc127061ef8eaf4f4ff59068e454c507eab83bce4665ce7ba5ea36063c",
+    "crates/p2p/src/listener/v2_transport_tests.rs": "c04c66da8a830319c90f3fdd326ec21dc8b9fc6ebfc8108d502c55168714dd7f",
+    "crates/p2p/src/service.rs": "83e1db7b96e3a73aaf5ddc79fc349c3192f65dd43e42f259b1c11f69d389b6f5",
+    "crates/p2p/tests/core_compat.rs": "93ed03024daca3e8db37a26c350cc4c0857d72ef10fb58c93b1cbc15924d3082",
+    "crates/p2p/tests/listener_ban.rs": "f78b2d28b9b9c7ac3cd3ce1fa0877e12b4cf81d559e15a3bfdedb05f6eb92242",
+    "crates/p2p/tests/listener_shutdown.rs": "caf50d2d802e2356ef61e09074d174060dec906dd8f97343ee91ae52e93c8466",
+    "crates/rpc/src/context.rs": "8f8e9bbafa2a41771f4d9e69ec97b46792a318cae5cbb4b18c2915eac7d2d682",
+    "crates/rpc/src/error.rs": "fe3c9f6ebb5e6e875478c7318bfc504588f8a856e9057325a3ae80457d38ae5f",
+    "crates/rpc/src/handlers.rs": "ac6cbceb05167cea511eb41c4514a33048aa7d7262b1769d79754424ee848d59",
+    "crates/rpc/src/handlers/chain.rs": "1b36e110ff82c817bb18bc0dae602002cc8e9255b0e9da58e86b214fd704059b",
+    "crates/rpc/src/handlers/filters.rs": "116707fcc9da0bdd42f0c84dcd41fb9233afef88e121b4ec3d84ba2c9c40320f",
+    "crates/rpc/src/handlers/network.rs": "ff8c99e811d04985cb7376ddbe50b0932b59fff9394bbe09ae1fb63823f4c193",
+    "crates/rpc/src/registry.rs": "69b204ddf147c299b194e4e9162dcf5f0ece449e381af7d327cf1c1d39a9610b",
+    "crates/rpc/tests/compact_filters.rs": "e63de55a0b496412e3f476ab4cde4edcc773f4743856faffb5ef1d2273d2f5e9",
+    "crates/rpc/tests/manifest_coverage.rs": "2de80310dc6c019872fa2ceaef6d4c7f28d1ae151fd9f72eab15381c8a62b890",
+    "crates/rpc/tests/policy_contract.rs": "8a0f754e01a6d49212a49f1315f27b1d809ec82d8e59b3205f29953baf6cfc78",
+    "crates/rpc/tests/support/harness.rs": "c0d9daba4d27a063a43f61d27bcd2aabab94874e9f4d604a6f7202be34a08bb3",
+    "docs/contracts/architecture.md": "9b31b079c51b9d52f5adc313f6ef8662e1471bca34fb96908785282434959c6e",
+    "docs/contracts/indexing.md": "91bb332fc4019d7c65219de14402b89b88e269d9f78fbb7eae58a46c6871517a",
+    "docs/getting-started.md": "e19351948081e0e9f3c97b8d5fc5ef4736037f6972afe6a258eecf5d6ff3c89c",
+    "docs/policies/db-migration.md": "50a2ad5d39edf4282beb31e7004516367634f0d138063c6bbe095667bb5879da",
+    "docs/policies/p2p-compatibility.md": "0bd59fc5d45cd1d06c570986c9a10b47f350f5fdd7bb89df76a1ce97836ae360",
+    "docs/rpc-reference.md": "98c43135723390b79f8395d4ffe13fb97e19af1bf4c57b2e95e54a779c0d2292",
+    "scripts/p2p_compact_filter_probe.py": "069584e81c914b7c56db7b4410298867fa6ff8507cb3466f3a5c9be3af9721ef",
+    "scripts/run-compact-filter-interop.py": "e87ebb077d3efa94ca9e6f178bf8830d264c82cf55a61ac22d7b16e1df697e01",
+    "scripts/tests/test_compact_filter_interop.py": "f03e9d23c02072b13b9f29c1f99a5b876b937198bd645616bbd88410c0e20dd6",
+    "tools/compact-filter-interop/Cargo.lock": "2e23050e0ef340e8eb362359567d7f51022650ae28cdf9c2649cb5adf8326054",
+    "tools/compact-filter-interop/Cargo.toml": "b4a0c4cff245e35fcb88a052240b711b39f67080c066877143c691c340b1789c",
+    "tools/compact-filter-interop/README.md": "620105a4408a23a5fcbb1b534b8bf138bf97c5b96d79b81b727d0f67751bfc88",
+    "tools/compact-filter-interop/src/main.rs": "00c9dcf1f46cafb89d47b0db42956219a7407ee2b88e996fe4698505dd0aec68"
+  },
+  "checks_completed": true,
+  "clean_shutdown": true,
+  "cleanup_errors": [],
+  "client_dependencies": {
+    "bdk_kyoto": "0.17.0",
+    "bdk_wallet": "3.1.0",
+    "bip157": "0.6.3"
+  },
+  "closed_candidate_footprints": [
+    {
+      "after_phase": "disabled_ibd",
+      "launch": "disabled",
+      "txindex": {
+        "allocated_bytes": 0,
+        "logical_bytes": 0,
+        "present": false
+      },
+      "whole_datadir": {
+        "allocated_bytes": 2396160,
+        "logical_bytes": 68253952,
+        "present": true
+      }
+    },
+    {
+      "after_phase": "clean_restart",
+      "launch": "enabled",
+      "txindex": {
+        "allocated_bytes": 761856,
+        "logical_bytes": 67249829,
+        "present": true
+      },
+      "whole_datadir": {
+        "allocated_bytes": 3088384,
+        "logical_bytes": 69421309,
+        "present": true
+      }
+    },
+    {
+      "after_phase": "clean_restart",
+      "launch": "restart",
+      "txindex": {
+        "allocated_bytes": 688128,
+        "logical_bytes": 573030,
+        "present": true
+      },
+      "whole_datadir": {
+        "allocated_bytes": 3014656,
+        "logical_bytes": 2744582,
+        "present": true
+      }
+    },
+    {
+      "after_phase": "cleanup",
+      "launch": "fresh-enabled",
+      "txindex": {
+        "allocated_bytes": 761856,
+        "logical_bytes": 67249829,
+        "present": true
+      },
+      "whole_datadir": {
+        "allocated_bytes": 3166208,
+        "logical_bytes": 135505253,
+        "present": true
+      }
+    }
+  ],
+  "core_version": "/Satoshi:31.1.0/",
+  "elapsed_seconds": 221.64118879200032,
+  "final_binary_sha256": {
+    "candidate": "fcb8e6853460c7925d1403a7e3695c0178e2a77e2f26a7402c54a81ea750f75f",
+    "client": "4db7c885a89358c6c13fc0a7839a6c7d9dabca6cb0c98ed67e6ee11fbe701c38",
+    "core": "986e63b3c8770f08d0059820ad3dd085d1ab9e1bea23946c243f858a06888a08"
+  },
+  "footprint_note": "Single-run regtest observations after clean shutdown; logical bytes are st_size, allocated bytes are st_blocks * 512, including directory entries. Neither whole-datadir deltas nor sparse logical sizes measure filter-row cost or representative production overhead.",
+  "limitations": [
+    "Single small regtest run; no representative overhead or acceptable-cost verdict.",
+    "Fresh replacement-chain wallet scan, not live wallet rollback.",
+    "No pruning support, mainnet backfill, full-process power-loss campaign or full CI qualification.",
+    "Compatibility applies only to recorded public outcomes with the pinned consumer and Core version."
+  ],
+  "passed": true,
+  "phases": [
+    {
+      "funding_txid": "abfcdabfa02ffc9432bd7a663346ddf4072230cabebfc28e4f8c583c9ca746be",
+      "name": "core_setup",
+      "seconds": 0.9450304399997549
+    },
+    {
+      "name": "kyoto_core_baseline",
+      "seconds": 0.31774962799863715,
+      "wallet": {
+        "log": "kyoto-core.log",
+        "result": {
+          "confirmation_hash": "3dfae91a3234d7ce213e87fa01012a27ae7b5e709eb22aa1d5689067394f3cbf",
+          "confirmation_height": 102,
+          "confirmed_sat": 21000000,
+          "height": 102,
+          "tip_hash": "3dfae91a3234d7ce213e87fa01012a27ae7b5e709eb22aa1d5689067394f3cbf",
+          "total_sat": 21000000,
+          "txid": "abfcdabfa02ffc9432bd7a663346ddf4072230cabebfc28e4f8c583c9ca746be"
+        }
+      }
+    },
+    {
+      "checks": [
+        "NODE_COMPACT_FILTERS set",
+        "1000 sequential cfilters equal Core",
+        "2000 cfheaders hashes and previous header equal Core",
+        "checkpoint boundaries 0/999/1000/1001/2000/2001 exact",
+        "1001 filters: disconnected without filter response",
+        "2001 headers: disconnected without filter response",
+        "reversed range: disconnected without filter response",
+        "unknown filter type: disconnected without filter response",
+        "unknown block hash: disconnected without filter response"
+      ],
+      "name": "wire_core_baseline",
+      "seconds": 2.9830779210005858
+    },
+    {
+      "index_absent": true,
+      "name": "disabled_ibd",
+      "seconds": 1.434909488998528,
+      "services_no_filter": true
+    },
+    {
+      "index": {
+        "basic block filter index": {
+          "best_block_height": 2001,
+          "synced": true
+        }
+      },
+      "name": "late_enable_backfill",
+      "seconds": 0.45394309500079544
+    },
+    {
+      "blocks": 2002,
+      "name": "rpc_parity",
+      "seconds": 201.87129414099945
+    },
+    {
+      "checks": [
+        "NODE_COMPACT_FILTERS set",
+        "1000 sequential cfilters equal Core",
+        "2000 cfheaders hashes and previous header equal Core",
+        "checkpoint boundaries 0/999/1000/1001/2000/2001 exact",
+        "1001 filters: disconnected without filter response",
+        "2001 headers: disconnected without filter response",
+        "reversed range: disconnected without filter response",
+        "unknown filter type: disconnected without filter response",
+        "unknown block hash: disconnected without filter response"
+      ],
+      "name": "wire_candidate",
+      "seconds": 4.945273641000313
+    },
+    {
+      "name": "kyoto_candidate",
+      "seconds": 0.6256846699998277,
+      "wallet": {
+        "log": "kyoto-candidate.log",
+        "result": {
+          "confirmation_hash": "3dfae91a3234d7ce213e87fa01012a27ae7b5e709eb22aa1d5689067394f3cbf",
+          "confirmation_height": 102,
+          "confirmed_sat": 21000000,
+          "height": 2001,
+          "tip_hash": "632ef4e890e425421f252b07b507f7bb9563e3f63c2b02db899808a1e478faa3",
+          "total_sat": 21000000,
+          "txid": "abfcdabfa02ffc9432bd7a663346ddf4072230cabebfc28e4f8c583c9ca746be"
+        }
+      }
+    },
+    {
+      "name": "clean_restart",
+      "seconds": 0.7371196660005808
+    },
+    {
+      "index": {
+        "basic block filter index": {
+          "best_block_height": 2001,
+          "synced": true
+        }
+      },
+      "name": "fresh_enabled_ibd",
+      "seconds": 1.5313918399988324,
+      "tip": "632ef4e890e425421f252b07b507f7bb9563e3f63c2b02db899808a1e478faa3"
+    },
+    {
+      "height": 2002,
+      "kyoto_fresh_replacement_chain_rescan": {
+        "log": "kyoto-replacement.log",
+        "result": {
+          "confirmation_hash": "3dfae91a3234d7ce213e87fa01012a27ae7b5e709eb22aa1d5689067394f3cbf",
+          "confirmation_height": 102,
+          "confirmed_sat": 21000000,
+          "height": 2002,
+          "tip_hash": "2bc44ba8a710e1bec8006df49c74f71f9186c4ea984e7af62a527690e005d944",
+          "total_sat": 21000000,
+          "txid": "abfcdabfa02ffc9432bd7a663346ddf4072230cabebfc28e4f8c583c9ca746be"
+        }
+      },
+      "name": "reorg",
+      "new_branch_tip": "2bc44ba8a710e1bec8006df49c74f71f9186c4ea984e7af62a527690e005d944",
+      "new_fork_block": "127407b5525ac63aed1fa77290682acae0fbf79a71da82c95bdef1585d5ecfc4",
+      "old_branch_tip": "632ef4e890e425421f252b07b507f7bb9563e3f63c2b02db899808a1e478faa3",
+      "old_fork_block": "6f46ef88d138f2f4bf91ee1e8215570579addd262270c246e0575e88b5bcfc86",
+      "seconds": 1.3239614839985734,
+      "stale_filter_retained": true
+    }
+  ],
+  "raw_record_schema": "bitcoin-rs-compact-filter-interop-v1",
+  "raw_record_sha256": "807630a2c875ead32068e44d01c3b9d751dced02b7e8520a315109ae962377fd",
+  "retention_note": "Protocol outcomes and source hashes copied from the terminal passed runner record. Host paths and process argument arrays omitted. This record was added after the run; checkout hashes observe the pre-commit source tree and are not build attestations.",
+  "rpc_parity_checked": 2002,
+  "run_id": "5d2c02edbfe44c5897711cbcdbc8c6df",
+  "schema": "bitcoin-rs-compact-filter-retained-evidence-v1",
+  "source_diff_sha256": "5c67acde1ea3ae4786244be70f4bf82d216a6779180de288930d4faf8b19e4c8",
+  "source_head": "5dafad023893cda9407396e2923863d88619a6c0",
+  "started_unix_seconds": 1791821895.3019836,
+  "status": "passed",
+  "timeout_seconds": 600.0
+}

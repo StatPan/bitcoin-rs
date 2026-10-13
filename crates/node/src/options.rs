@@ -27,7 +27,7 @@ use anyhow::{Result, bail};
 use serde::Deserialize;
 use serde::de::{Error as _, MapAccess, Visitor};
 
-use crate::config::{NetworkSelection, NotificationConfig, ScriptIndexMode};
+use crate::config::{BlockFilterIndexMode, NetworkSelection, NotificationConfig, ScriptIndexMode};
 use bitcoin::hex::FromHex;
 use bitcoin_rs_chainstate::ValidationMode;
 use bitcoin_rs_consensus::ValidationEngine;
@@ -51,6 +51,17 @@ pub fn parse_script_index(value: &str) -> std::result::Result<ScriptIndexMode, S
     ScriptIndexMode::parse(value).ok_or_else(|| {
         format!("invalid scriptindex value `{value}`: expected `utxo`, `full`, or a boolean")
     })
+}
+
+/// Parses the optional BIP158 basic-filter index selection.
+pub fn parse_block_filter_index(value: &str) -> std::result::Result<BlockFilterIndexMode, String> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "basic" | "1" | "true" | "yes" | "on" => Ok(BlockFilterIndexMode::Basic),
+        "0" | "false" | "no" | "off" => Ok(BlockFilterIndexMode::Disabled),
+        _ => Err(format!(
+            "invalid blockfilterindex value `{value}`: expected `basic` or a boolean"
+        )),
+    }
 }
 
 /// Parses a validation mode.
@@ -546,6 +557,13 @@ macro_rules! option_rows {
                         env["BITCOIN_RS_FAST_SYNC", parse_bool]
                         toml native("fast_sync")
                     }
+                    /// Whether to serve BIP157 requests when the basic-filter index is ready.
+                    peer_block_filters as peerblockfilters: Option<bool> {
+                        cli[#[arg(long = "peerblockfilters", num_args = 0..=1, default_missing_value = "true")]]
+                        env["BITCOIN_RS_PEERBLOCKFILTERS", parse_bool]
+                        toml native("peerblockfilters")
+                        conf["peerblockfilters"]
+                    }
                     /// Whether to attempt and accept BIP324 v2 encrypted
                     /// connections and advertise `NODE_P2P_V2`.
                     v2_transport as v2transport: Option<bool> {
@@ -600,6 +618,13 @@ macro_rules! option_rows {
                         env["BITCOIN_RS_TXINDEX", parse_bool]
                         toml native("txindex")
                         conf["txindex"]
+                    }
+                    /// Whether the optional BIP158 basic-filter index is enabled.
+                    block_filter_index as blockfilterindex: Option<BlockFilterIndexMode> {
+                        cli[#[arg(long = "blockfilterindex", num_args = 0..=1, default_missing_value = "basic", value_parser = parse_block_filter_index)]]
+                        env["BITCOIN_RS_BLOCKFILTERINDEX", parse_block_filter_index]
+                        toml text("blockfilterindex", parse_block_filter_index)
+                        conf["blockfilterindex"]
                     }
                     /// Script index mode.
                     script_index as script_index: Option<ScriptIndexMode> {

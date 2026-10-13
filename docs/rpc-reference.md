@@ -99,6 +99,7 @@ Unimplemented-set derivation: audited against the Bitcoin Core v31.0 source comm
 | `generateblock` | 0.4.0 | Assembles and solves one block paying an address or descriptor from the listed mempool txids or raw txs in that order. See the canonical contract: docs/contracts/external-api.md#API-31. |
 | `getnetworkhashps` | 0.4.0 | Estimated hashes/s over a caller-chosen lookback ending at a caller-chosen height; default lookback 120, height the applied tip. |
 | `getprioritisedtransactions` | 0.4.0 | Projects the mempool's signed fee-delta overlay, including txids not currently pooled. See docs/contracts/external-api.md#API-28 for modified_fee units. |
+| `getblockfilter` | 0.14.0 | Requires the optional basic block filter index. Serves exact stored filter bytes and headers; unavailable coverage fails explicitly. |
 
 ### Extension
 
@@ -111,7 +112,6 @@ Unimplemented-set derivation: audited against the Bitcoin Core v31.0 source comm
 | surface | since | notes |
 |---|---|---|
 | `dumptxoutset` | n/a | UTXO snapshot dump not implemented. |
-| `getblockfilter` | n/a | BIP157/158 compact block filters and the filter index are not implemented. |
 | `getblockfrompeer` | n/a | No on-demand block fetch from peers. |
 | `getdescriptoractivity` | n/a | No wallet/scan index to serve it. |
 | `getmempoolcluster` | n/a | Cluster mempool tracking not implemented. |
@@ -119,7 +119,7 @@ Unimplemented-set derivation: audited against the Bitcoin Core v31.0 source comm
 | `preciousblock` | n/a | No manual block-preference surface. |
 | `reconsiderblock` | n/a | No manual reorg-control surface. |
 | `savemempool` | n/a | Mempool dump/reload persistence not implemented. |
-| `scanblocks` | n/a | No BIP157/158 filter index to scan. |
+| `scanblocks` | n/a | Compact-filter scanning is not implemented. |
 | `help` | n/a | No per-method help text renderer. |
 | `logging` | n/a | Log-category controls not exposed over RPC. |
 | `stop` | n/a | Lifecycle control not exposed over RPC. |
@@ -239,4 +239,4 @@ Unimplemented-set derivation: audited against the Bitcoin Core v31.0 source comm
 | `rawtx` | 0.4.0 | Requires the zmq feature and a --zmqpubrawtx endpoint. |
 | `sequence` | 0.4.0 | Requires the zmq feature and a --zmqpubsequence endpoint. Publishes C/D block events and A/R mempool events; A/R carry reversed txid, the label byte, and the mempool sequence as u64 LE (crates/rpc/src/zmq.rs). |
 
-Row counts: Supported 0, Deviation 30, Implemented (unverified) 57, Extension 2, Disabled 0, Unimplemented 86 - total 175.
+Row counts: Supported 0, Deviation 30, Implemented (unverified) 58, Extension 2, Disabled 0, Unimplemented 85 - total 175.

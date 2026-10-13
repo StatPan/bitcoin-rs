@@ -110,6 +110,13 @@ pub trait ChainQuery: Send + Sync {
         None
     }
 
+    /// Height of a validated block eligible for BIP157 serving, including
+    /// recent stale blocks under the same age rules as block inventory.
+    /// This does not require a retained body or read compact-filter storage.
+    fn filter_stop_height(&self, _hash: BlockHash) -> Option<u32> {
+        None
+    }
+
     /// Builds one `cmpctblock` message for the block at `height` and `hash`
     /// at the given BIP152 version.
     fn compact_block_for(
@@ -198,6 +205,7 @@ pub fn dispatch_inbound<S>(
         message,
         None,
         None,
+        None,
         &|| true,
         &|| true,
         &mut |response| {
@@ -210,7 +218,7 @@ pub fn dispatch_inbound<S>(
     Ok(responses.into_inner())
 }
 
-/// Dispatch with an active-chain view and a transaction-inventory filter.
+/// Dispatch with an active-chain view and optional transaction and filter queries.
 ///
 /// Every response is emitted through `send` in the identical order the
 /// former batch form produced (I8); `send` errors abort emission and
@@ -222,6 +230,9 @@ pub fn dispatch_inbound<S>(
 /// recent-rejects) and the `getdata` arm serves tx bodies for tx-typed
 /// items the node has, reporting the rest as `notfound`. Inventory types
 /// identify txids or wtxids independently of the peer's outbound preference.
+///
+/// `compact_filters` enables BIP157 serving. `None` preserves ignored requests;
+/// every enabled query rechecks index readiness and streams through the same sink.
 ///
 /// `tx_relay_open` reports whether the node accepts transaction relay from
 /// peers (it is not in initial block download). While it returns `false`,
@@ -243,6 +254,7 @@ pub fn dispatch_inbound_full<S>(
     message: &Message,
     chain: Option<&dyn ChainQuery>,
     tx_inventory: Option<&dyn TxInventory>,
+    compact_filters: Option<&dyn bitcoin_rs_index::query_api::CompactFilterQuery>,
     tx_relay_open: &dyn Fn() -> bool,
     headroom: &dyn Fn() -> bool,
     send: &mut dyn FnMut(Message) -> Result<(), PeerError>,
@@ -319,6 +331,10 @@ pub fn dispatch_inbound_full<S>(
             step(peer, message)?;
             let compact_version = peer.compact_blocks.servable_version();
             serve_block_txn(chain, &request.txs_request, compact_version, headroom, send)?;
+        }
+        Message::GetCFilters(_) | Message::GetCFHeaders(_) | Message::GetCFCheckpt(_) => {
+            step(peer, message)?;
+            crate::compact_filters::serve(message, chain, compact_filters, headroom, send)?;
         }
         _ => step(peer, message)?,
     }
@@ -690,6 +706,7 @@ mod tests {
             message,
             chain,
             None,
+            None,
             &|| true,
             &|| true,
             &mut |response| {
@@ -987,6 +1004,7 @@ mod tests {
             &message,
             Some(&chain),
             None,
+            None,
             &|| true,
             &|| false,
             &mut |response| {
@@ -1145,6 +1163,7 @@ mod tests {
             &Message::GetData(vec![known]),
             Some(&chain),
             None,
+            None,
             &|| true,
             &|| false,
             &mut |response| {
@@ -1200,6 +1219,7 @@ mod tests {
             &Message::GetData(vec![known; MAX_INV_PER_MSG]),
             Some(&chain),
             None,
+            None,
             &|| true,
             &|| budget.has_block_production_headroom(),
             &mut |message| {
@@ -1248,6 +1268,7 @@ mod tests {
             &mut peer,
             &Message::GetData(vec![known; 4]),
             Some(&chain),
+            None,
             None,
             &|| true,
             &|| true,
@@ -1862,6 +1883,7 @@ mod tests {
             message,
             chain,
             tx_inventory,
+            None,
             &|| relay_open,
             &|| true,
             &mut |response| {

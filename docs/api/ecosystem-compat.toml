@@ -65,10 +65,10 @@ evidence = "black-box request/response and relay outcomes only: Core serving res
 
 [[row]]
 surface = "Compact block filters (BIP157/BIP158)"
-core_reference = "BIP157/BIP158"
-status = "intentionally unsupported"
-representative_consumer = "none"
-evidence = "NODE_COMPACT_FILTERS not advertised, filter P2P commands ignored (docs/policies/p2p-compatibility.md section 5 message table)."
+core_reference = "BIP157/BIP158; Bitcoin Core 31.1"
+status = "externally verified"
+representative_consumer = "unmodified bdk_kyoto 0.17.0 / bdk_wallet 3.1.0 (locked bip157 0.6.3), one whitelisted loopback peer"
+evidence = "tools/compact-filter-interop/evidence/regtest-2026-10-12.json records the passed scripts/run-compact-filter-interop.py campaign: exact funded transaction, confirmed balance and chain tip through the real consumer; Core parity for 2002 filters/headers, bounded wire requests, service flags, late-enable backfill, clean restart, replacement branch and retained stale filter. The post-reorg wallet starts fresh. Both flags default off; pruning with indexing is rejected. This bounded regtest claim excludes live wallet rollback, crash recovery, mainnet overhead and cost acceptance. Reproduction and limits: tools/compact-filter-interop/README.md."
 
 [[row]]
 surface = "Peer lifecycle and address management"

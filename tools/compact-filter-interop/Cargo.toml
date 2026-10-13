@@ -1,0 +1,13 @@
+[package]
+name = "compact-filter-interop-probe"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# External wallet dependencies belong to this evidence tool, not the node graph.
+[workspace]
+
+[dependencies]
+bdk_kyoto = "=0.17.0"
+bdk_wallet = "=3.1.0"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }

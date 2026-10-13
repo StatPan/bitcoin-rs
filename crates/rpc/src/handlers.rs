@@ -10,6 +10,7 @@ use crate::error::RpcError;
 
 pub(crate) mod chain;
 pub(crate) mod deployment;
+pub(crate) mod filters;
 pub(crate) mod mempool;
 pub(crate) mod mining;
 pub(crate) mod network;

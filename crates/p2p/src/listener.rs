@@ -119,6 +119,8 @@ pub struct ConnectionShared {
     pub tx_inventory: TxInventoryHandle,
     /// Compact-block short-ID hints for BIP152 reconstruction.
     pub compact_hints: CompactHintsHandle,
+    /// Optional basic-filter serving capability. Absent when peerblockfilters is off.
+    pub compact_filters: Option<Arc<dyn bitcoin_rs_index::query_api::CompactFilterQuery>>,
     /// Bounded ingress for decoded `tx` bodies from Ready peers.
     pub inbound_tx: Option<Sender<crate::InboundTx>>,
     /// Chain-owned initial-block-download latch paired with the node's
@@ -167,6 +169,7 @@ impl ConnectionShared {
         headers_tx: Sender<crate::InboundHeaders>,
         blocks_tx: Sender<crate::InboundBlock>,
         chain_query: ChainQueryHandle,
+        compact_filters: Option<Arc<dyn bitcoin_rs_index::query_api::CompactFilterQuery>>,
         wake_tx: SyncWakeHandle,
         extras: ListenerExtras,
     ) -> Self {
@@ -185,6 +188,7 @@ impl ConnectionShared {
             wake_tx,
             tx_inventory: extras.tx_inventory,
             compact_hints: extras.compact_hints,
+            compact_filters,
             inbound_tx: extras.inbound_tx,
             ibd: extras.ibd,
             block_sync: extras.block_sync,
@@ -193,6 +197,12 @@ impl ConnectionShared {
             local_services: ServiceFlags::NETWORK | ServiceFlags::WITNESS,
             v2_transport: false,
         }
+    }
+
+    /// Current advertised services, including basic filters only while fully ready.
+    #[must_use]
+    pub fn advertised_services(&self) -> ServiceFlags {
+        crate::compact_filters::local_services(self.local_services, self.compact_filters.as_deref())
     }
 
     fn check_destination(&self, addr: SocketAddr, manual: bool) -> Result<(), crate::PeerError> {
@@ -946,7 +956,7 @@ fn run_outbound_handshake<S: std::io::Read + std::io::Write>(
         nonce,
         start_height,
         lease.role(),
-        shared.local_services,
+        shared.advertised_services(),
     );
     for message in outbound_messages {
         peer.send(&message)?;
@@ -1159,7 +1169,7 @@ fn run_handshake(
         &mut peer,
         nonce,
         0,
-        shared.local_services,
+        shared.advertised_services(),
         &lease,
         handshake_deadline,
     ) {
@@ -1657,8 +1667,15 @@ fn run_message_loop<S: std::io::Read + std::io::Write>(
                     &message,
                     shared.chain_query.as_deref(),
                     shared.tx_inventory.as_deref(),
+                    shared.compact_filters.as_deref(),
                     &tx_relay_open,
-                    &|| budget.has_block_production_headroom(),
+                    &|| {
+                        if matches!(message, crate::Message::GetCFilters(_)) {
+                            budget.has_filter_production_headroom()
+                        } else {
+                            budget.has_block_production_headroom()
+                        }
+                    },
                     &mut |response| {
                         lease
                             .send(response)
@@ -2189,7 +2206,7 @@ fn generate_nonce(peer_addr: SocketAddr) -> u64 {
 /// Wiring for unit tests: an active network, a start token that stays
 /// `false`, no bans, no ready callback, no node handles, and mainnet magic.
 #[cfg(test)]
-fn test_shared(
+pub(crate) fn test_shared(
     peer_table: Arc<crate::PeerTable>,
     headers_tx: Sender<crate::InboundHeaders>,
     blocks_tx: Sender<crate::InboundBlock>,
@@ -2205,6 +2222,7 @@ fn test_shared(
         Magic::BITCOIN,
         headers_tx,
         blocks_tx,
+        None,
         None,
         None,
         ListenerExtras::default(),

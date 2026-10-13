@@ -247,6 +247,11 @@ impl ChainQuery for ActiveChainQuery {
         tree.active_height_of(tip.tip_id, hash.into())
     }
 
+    fn filter_stop_height(&self, hash: BlockHash) -> Option<u32> {
+        self.serving_position(hash, ServingPolicy::Inventory)
+            .map(|(_, height)| height)
+    }
+
     fn compact_block_for(
         &self,
         height: u32,
@@ -604,6 +609,9 @@ mod tests {
         applied_tip.store(Some(applied));
         let query = ActiveChainQuery::new(block_tree, applied_tip, Network::Regtest);
 
+        assert_eq!(query.filter_stop_height(headers[1].compute_hash()), Some(1));
+        assert_eq!(query.filter_stop_height(headers[2].compute_hash()), None);
+        assert_eq!(query.filter_stop_height(BlockHash::default()), None);
         assert_eq!(
             query.committed_tip(),
             Some(CommittedTip {
@@ -1433,6 +1441,7 @@ mod tests {
                         }),
                         Some(&query),
                         None,
+                        None,
                         &|| true,
                         &|| true,
                         &mut |_| panic!("sendcmpct does not emit a response"),
@@ -1522,6 +1531,7 @@ mod tests {
                     }),
                     Some(&query),
                     None,
+                    None,
                     &|| true,
                     &|| true,
                     &mut |_| panic!("sendcmpct does not emit a response"),
@@ -1552,6 +1562,7 @@ mod tests {
                         },
                     }),
                     Some(&query),
+                    None,
                     None,
                     &|| true,
                     &|| true,
@@ -1609,6 +1620,7 @@ mod tests {
             peer,
             request,
             Some(query),
+            None,
             None,
             &|| true,
             &|| true,
@@ -1851,6 +1863,12 @@ mod tests {
                 &mut |_| Ok(()),
             )?;
             assert_eq!(outcome.not_found.is_empty(), allowed);
+            // BIP157 follows this exact validated-stale/age policy without
+            // requiring (or loading) the block body.
+            assert_eq!(
+                query.filter_stop_height(stale.block_hash()),
+                allowed.then_some(1)
+            );
             assert_eq!(source.loads.load(Ordering::Relaxed), usize::from(allowed));
             // Shallow HAVE_DATA requests intentionally do not inherit the
             // inventory age/validation filter (Core GETBLOCKTXN).

@@ -23,6 +23,16 @@ pub struct NotificationConfig {
     pub zmq: Vec<bitcoin_rs_rpc::zmq::ZmqEndpointConfig>,
 }
 
+/// The only supported BIP158 filter type, or the disabled default.
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
+pub enum BlockFilterIndexMode {
+    /// Do not build or persist filters.
+    #[default]
+    Disabled,
+    /// Build BIP158 basic filters and their header chain.
+    Basic,
+}
+
 /// How much of the derived `ScriptIndex` a node maintains.
 ///
 /// `ScriptIndex` is rebuildable derived state, so the mode is a capability
@@ -63,7 +73,7 @@ impl ScriptIndexMode {
     ///
     /// PRE: none.
     /// POST: one of `NONE`, `TX_LOOKUP`, `SCRIPT_LIVE`, `TX_LOOKUP_SCRIPT_LIVE`,
-    /// `ALL`. Full always includes `TxLookup` regardless of txindex (Esplora
+    /// `TX_SCRIPT`. Full always includes `TxLookup` regardless of txindex (Esplora
     /// prevout and fee rendering needs exact historical transactions); the
     /// RPC-visible `derived_index_query` gate still requires an explicit
     /// `--txindex`.
@@ -76,7 +86,7 @@ impl ScriptIndexMode {
             (true, Self::Disabled) => IndexCapabilities::TX_LOOKUP,
             (false, Self::Utxo) => IndexCapabilities::SCRIPT_LIVE,
             (true, Self::Utxo) => IndexCapabilities::TX_LOOKUP_SCRIPT_LIVE,
-            (_, Self::Full) => IndexCapabilities::ALL,
+            (_, Self::Full) => IndexCapabilities::TX_SCRIPT,
         }
     }
 
@@ -139,6 +149,10 @@ pub struct StorageConfig {
 }
 
 /// Resolved P2P configuration.
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "Independent operator switches are not mutually exclusive protocol states."
+)]
 #[derive(Clone, Debug)]
 pub struct P2pConfig {
     /// P2P message-start bytes.
@@ -159,6 +173,8 @@ pub struct P2pConfig {
     /// `NODE_P2P_V2` is advertised. Off by default until v2 interoperability
     /// with Bitcoin Core is recorded (#1503).
     pub v2_transport: bool,
+    /// Serve basic compact filters only while their derived index is ready.
+    pub peer_block_filters: bool,
 }
 
 /// Resolved RPC configuration.
@@ -173,6 +189,8 @@ pub struct RpcConfig {
 #[derive(Clone, Debug)]
 pub struct IndexConfig {
     pub txindex: bool,
+    /// Maintain optional BIP158 basic filters; disabled by default.
+    pub block_filter_index: bool,
     pub script_index: ScriptIndexMode,
 }
 
@@ -271,6 +289,7 @@ impl NodeConfig {
                 connect: settings.p2p.connect.clone().unwrap_or(profile.connect),
                 fast_sync: settings.p2p.fast_sync.unwrap_or(false),
                 v2_transport: settings.p2p.v2_transport.unwrap_or(false),
+                peer_block_filters: settings.p2p.peer_block_filters.unwrap_or(false),
             },
             rpc: RpcConfig {
                 bind: settings.rpc.bind.unwrap_or(profile.rpc_bind),
@@ -279,6 +298,8 @@ impl NodeConfig {
             },
             indexes: IndexConfig {
                 txindex: settings.indexes.txindex.unwrap_or(false),
+                block_filter_index: settings.indexes.block_filter_index
+                    == Some(BlockFilterIndexMode::Basic),
                 script_index: settings
                     .indexes
                     .script_index
@@ -328,6 +349,14 @@ impl NodeConfig {
             "validation engine `{}` is not supported by this build: bitcoinkernel \
              support is not compiled in (enable the `kernel` feature)",
             self.validation.engine
+        );
+        anyhow::ensure!(
+            !self.p2p.peer_block_filters || self.indexes.block_filter_index,
+            "-peerblockfilters requires -blockfilterindex=basic"
+        );
+        anyhow::ensure!(
+            !self.indexes.block_filter_index || self.storage.prune_target_mb == 0,
+            "compact filter indexing requires retained block and undo history; -prune is unsupported"
         );
         if self.p2p.magic != self.network.magic() {
             anyhow::ensure!(

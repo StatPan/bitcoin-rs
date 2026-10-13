@@ -1,13 +1,13 @@
 # Indexing contract
 
-**Contract version: 1.1** (2025-02-14)
+**Contract version: 1.2** (2026-10-12)
 
 The normative contract for node-owned indexing runtimes, capability gating, and
 asynchronous reconciliation across restarts, reorganizations, and selective
 rebuilds.
 
-This version adds the scheduling requirements in `IDX-08`; changes to those
-requirements must update this clause and its executable proof together.
+This version adds optional basic-filter ownership and preservation in `IDX-11`.
+Changes to these requirements must update their executable proof together.
 
 Owners:
 - `DerivedIndexRuntime` and worker state in `crates/index/src/runtime.rs`;
@@ -57,10 +57,13 @@ only scheduling mechanics.
   activity; `scriptindex=full` enables both `ScriptLive` and `ScriptHistory`.
   The historical boolean spellings (`true`, `1`, `yes`) continue to mean
   `full`, and (`false`, `0`, `no`) mean disabled. There is no history-only mode.
-- Enabling either `--txindex` or `--scriptindex` spawns exactly one node-owned
-  `DerivedIndexRuntime` worker thread. Enabling both permits both capability row
-  families to share a single block-body parse and atomic forward commit batch
-  when their watermarks are aligned.
+- `--blockfilterindex=basic` selects the independent `CompactFilter` capability;
+  it defaults off and does not imply transaction or script indexing.
+- Enabling any combination of `--txindex`, `--scriptindex`, and
+  `--blockfilterindex` spawns exactly one node-owned `DerivedIndexRuntime`
+  worker. Aligned capabilities share body loading and an atomic forward batch.
+  Transaction/script rows share their parse; optional filter preparation also
+  decodes the native block for its authoritative script selection.
 
 ### `IDX-02`: Capability advertisement and Core compatibility
 
@@ -97,8 +100,11 @@ unneeded funding record lists when callers only require history records.
 
 ### `IDX-03`: Query gating and snapshot consistency
 
-- **Ready invariant**: `ready ⇔ cursor == applied_tip on active chain`.
-- `DerivedIndexQueryEngine::with_snapshot` and `index_info` gate every read:
+- **Ready invariant**: `ready ⇔ cursor == applied_tip on active chain`, together
+  with capability-specific integrity checks. Immutable single-filter reads have
+  the narrower retained-record rule in `IDX-11`.
+- `DerivedIndexQueryEngine::with_snapshot` and `index_info` gate transaction and
+  script reads:
   1. The worker runtime must be healthy (neither `failed` nor `shutdown`).
   2. The applied tip loaded before snapshot creation must match the durable
      capability watermark (`IndexWatermark { height, hash }`) for every consumed
@@ -123,7 +129,7 @@ unneeded funding record lists when callers only require history records.
 
 ### `IDX-04`: Selective reset preserves sibling readiness
 
-- When one capability watermark experiences corruption, a missing block body
+- For transaction/script capabilities, when a watermark experiences corruption, a missing block body
   during reorg rollback, or a schema/version mismatch, the worker resets only
   the degraded capability watermark to `None` and backfills it from the active
   chain.
@@ -145,7 +151,8 @@ unneeded funding record lists when callers only require history records.
   durability marker only (row-format 5: big-endian heights, 43-byte live rows,
   6-byte positions — format owned by
   `docs/benchmarks/scriptindex-format.md`); every older marker is `IndexError::UnsupportedTxIndexFormatVersion`
-  and recovery full-resets the store for rebuild. No in-place upgrade path
+  and recovery resets the legacy transaction/script families for rebuild, preserving
+  the separately versioned filter records. No in-place upgrade path
   exists. (`IDX-04` selective reset still covers corrupt watermarks, not versions.)
 - The dedicated redb store corrects the former 44-byte ScriptLive table
   declaration only when that table is empty. A populated incompatible table
@@ -199,7 +206,8 @@ unneeded funding record lists when callers only require history records.
   - When the rollback depth (watermark height minus common ancestor height)
     exceeds `txindex::DEFAULT_ROLLBACK_REBUILD_CUTOVER` (100 000 blocks),
     the worker routes to `reset_capabilities` and backfills forward instead of
-    executing a long block-by-block rollback
+    executing a long block-by-block rollback. Immutable filters instead rewind
+    their cursor without deleting records or consulting bodies/undo
     (`docs/benchmarks/index-rollback-rebuild-cutover.md`).
 - **Connect walk**:
   - The worker loads bodies from `BlockBodyStore`, constructs bounded forward
@@ -231,6 +239,69 @@ unneeded funding record lists when callers only require history records.
   storage failure or panic marks the worker as failed (`publish_failed`) and
   stops the worker. Block validation, UTXO commits, and chainstate progress
   continue unimpeded: the apply path never depends on index writes.
+
+### `IDX-11`: Optional BIP158 filters and immutable BIP157 commitments
+
+- `compact_filter::basic_filter` consumes only an already validated block and
+  authoritative spent scripts. Same-block inputs resolve against the block's
+  outputs before undo. Missing external prevouts refuse preparation; they are
+  never silently omitted. Empty scripts are excluded, output scripts starting
+  with OP_RETURN are excluded, and elements are deduplicated. Filter output
+  selection is distinct from ScriptLive/UTXO admission (including oversized
+  scripts and genesis).
+- The existing writer, backend, worker and batch fences own filters. There is
+  no second UTXO owner, extension framework, scheduler or synchronous filter
+  callback on block validation. The default node creates no filter work/store;
+  a disabled filter capability does no filter-blob decoding, script lookup or blob
+  preparation. An existing enabled transaction/script writer includes the fourth
+  watermark in its coherent fence; this small extra metadata operation is not
+  a claim of zero overhead for other optional indexes. A malformed optional
+  filter watermark is retained as exact opaque fence bytes: transaction/script
+  writes preserve it, while enabled filter reconciliation and direct filter
+  watermark reads refuse it. Legacy watermark corruption keeps its prior error
+  semantics; no cursor is silently repaired or reset.
+- Metadata is `F || 0x00 || height(BE,u32) || block_hash`; its fixed 97-byte
+  value is `version=2 || parent_hash || filter_hash || filter_header`. The paired
+  `F || 0x01 || height || block_hash` value contains only serialized filter bytes.
+  Internal hashes use consensus byte order. The two keys, capability watermark
+  (`0x00,F`) and cursor disposition publish in one atomic batch. Admission counts
+  two rows and 173 bytes plus the filter payload per block.
+- Metadata is the sole persisted owner of filter hash/header. Metadata-only
+  queries never fetch filter blobs. Full-record reads verify the blob checksum.
+  Existing anchors validate their full blob, exact predecessor metadata and
+  header recurrence before extension or rewind. Rewind additionally validates
+  the target predecessor's full blob; only genesis uses the zero predecessor
+  header.
+  Unknown record versions and inconsistent/missing components refuse access or
+  advancement without migration, repair or implicit reset.
+- Reorganizations rewind only the filter watermark. Immutable records remain
+  queryable by exact block identity after disconnect; reconnection must reproduce
+  both components. Disabling filters preserves their rows and watermark. Legacy
+  `reset_index` preserves them. Explicit filter reset invalidates its watermark
+  and deletes only the `F` prefix in existing bounded, fenced reset batches.
+  This bounds each batch, not total retained historical/stale-branch disk space.
+- Late enablement backfills from genesis only when retained block/undo facts can
+  produce the full header chain. A history gap is explicit unavailability, never
+  a synthetic pruned-prefix filter anchor. Node configuration currently rejects
+  `blockfilterindex` with pruning. Filter-specific failures stop only filter
+  reconciliation; storage failures retain the existing whole-worker failure rule.
+- `CompactFilterQuery` is the only external filter read capability. Single-block
+  reads can return valid retained records while indexing lags. P2P ranges require
+  a matching active watermark; all reads recheck runtime health, local filter
+  refusal, applied tip/revision and requested block eligibility. Plans are anchored
+  to the requested stop hash, not changing active-height lookups.
+- Readiness additionally validates the exact tip blob and tip/parent metadata.
+  It is a bounded integrity probe, not an audit of every historical row; each
+  request checks its own records. Streamed filters check outbound headroom before
+  each blob and hold only one blob, with count/size/ancestry bounds. Hash/header
+  ranges consume fixed metadata, not the unrelated cumulative historical-query
+  byte budget.
+
+Proof: `tests/compact_filter.rs` (official BIP158 vectors and prevout edge cases),
+`tests/compact_filter_storage.rs` (atomic components/cursor, corruption/version
+refusal, prefix reset, branch retention and physical reopen),
+`runtime/filter_tests.rs` (worker isolation, reorg and late enablement), and
+`runtime/query/filter_tests.rs` (ranges, readiness, streaming and invalidation).
 
 ## Live gaps
 

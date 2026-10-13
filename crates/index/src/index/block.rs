@@ -1,4 +1,5 @@
-//! Parse-once block preparation and authoritative spent-script anchoring.
+//! Block preparation and authoritative spent-script anchoring.
+//! Legacy rows share a layout parse; enabled filters currently decode a native block too.
 
 use super::{
     capability::{IndexCapabilities, IndexCapability},
@@ -76,7 +77,9 @@ fn pending_rows_for_block_with_header(
     let height_bytes = encode_height(height);
     let header_row = header.to_db_row();
     let mut rows = PendingRows::default();
-    rows.header_rows.push(header_row);
+    if capabilities != IndexCapabilities::COMPACT_FILTER {
+        rows.header_rows.push(header_row);
+    }
     let mut live_created: Vec<([u8; 32], u32, Option<ScriptHash>)> = Vec::new();
     let mut live_spent: Vec<([u8; 32], u32)> = Vec::new();
 
@@ -261,7 +264,7 @@ impl<S: KvStore> IndexWriter<S> {
         self.prepare_block_for(IndexCapabilities::HISTORICAL, height, hash, body)
     }
 
-    /// Derives capability-selected row mutations from one serialized block scan.
+    /// Derives capability-selected row mutations; filters additionally decode a native block.
     pub fn prepare_block_for(
         &self,
         capabilities: IndexCapabilities,
@@ -303,8 +306,27 @@ impl<S: KvStore> IndexWriter<S> {
         let mut parent_hash = [0_u8; 32];
         parent_hash.copy_from_slice(&header[4..36]);
         rows.sort();
-        let row_count = rows.total();
-        let encoded_bytes = rows.encoded_bytes()?;
+        let filter = if capabilities.contains(IndexCapability::CompactFilter) {
+            let block = bitcoin_rs_primitives::deserialize::<bitcoin_rs_primitives::Block>(body)
+                .map_err(IndexError::BlockParse)?;
+            Some(crate::compact_filter::basic_filter(&block, spent_scripts)?)
+        } else {
+            None
+        };
+        let row_count = rows
+            .total()
+            .checked_add(if filter.is_some() { 2 } else { 0 })
+            .ok_or(IndexError::MutationSizeOverflow)?;
+        let filter_bytes = filter.as_ref().map_or(Ok(0), |bytes| {
+            bytes
+                .len()
+                .checked_add(super::filter::FILTER_RECORD_OVERHEAD)
+                .ok_or(IndexError::MutationSizeOverflow)
+        })?;
+        let encoded_bytes = rows
+            .encoded_bytes()?
+            .checked_add(filter_bytes)
+            .ok_or(IndexError::MutationSizeOverflow)?;
         Ok(PreparedBlock {
             height,
             hash,
@@ -313,6 +335,7 @@ impl<S: KvStore> IndexWriter<S> {
             encoded_bytes,
             capabilities,
             rows,
+            filter,
         })
     }
 }

@@ -36,7 +36,7 @@ impl<S: KvStore> Indexer<S> {
         self.store
             .get(ColumnFamily::UtxoMeta, key)?
             .as_deref()
-            .map(IndexWatermark::from_bytes)
+            .map(|bytes| IndexWatermark::from_capability_bytes(bytes, capability))
             .transpose()
     }
 
@@ -46,6 +46,7 @@ impl<S: KvStore> Indexer<S> {
             tx_lookup: self.capability_watermark(IndexCapability::TxLookup)?,
             script_history: self.capability_watermark(IndexCapability::ScriptHistory)?,
             script_live: self.capability_watermark(IndexCapability::ScriptLive)?,
+            compact_filter: self.capability_watermark(IndexCapability::CompactFilter)?,
         })
     }
 

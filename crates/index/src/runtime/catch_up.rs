@@ -189,12 +189,40 @@ impl Worker {
         self.finish_catch_up(state, chunk_end, target, &pass_history, pending)
     }
 
+    /// Loads authoritative spent scripts only for the selected consumers.
+    fn spent_anchors(
+        &self,
+        capabilities: IndexCapabilities,
+        identities: &[BlockIdentity],
+    ) -> Result<Option<Vec<super::UndoScripts>>, DerivedIndexWorkerError> {
+        if !capabilities.contains(IndexCapability::ScriptLive)
+            && !capabilities.contains(IndexCapability::CompactFilter)
+        {
+            return Ok(None);
+        }
+        let mut anchors = Vec::with_capacity(identities.len());
+        for identity in identities {
+            match self.live_anchor(identity.height, identity.hash) {
+                Ok(anchor) => anchors.push(anchor),
+                Err(DerivedIndexWorkerError::UndoUnavailable { .. })
+                    if capabilities == IndexCapabilities::COMPACT_FILTER =>
+                {
+                    // Coinbase-only blocks need no undo. Preparation still
+                    // fails closed when an external input needs an absent script.
+                    anchors.push(super::UndoScripts::default());
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(Some(anchors))
+    }
+
     /// Loads bodies serially until the count or byte cap, prepares that prefix
     /// in parallel across the rayon pool, then admits them into the batch in
     /// height order on the single writer thread. Advances `identities` past
-    /// the loaded prefix. Returns `Stalled` if a body is missing or shutdown
-    /// was requested, `Progressed` if the batch filled and was committed, or
-    /// `Continue` to keep processing.
+    /// the loaded prefix. Missing bodies suspend optional filter work with
+    /// `Progressed`; legacy-only gaps and shutdown return `Stalled`. A full
+    /// committed batch also returns `Progressed`, otherwise `Continue`.
     pub(super) fn prepare_and_admit_chunk(
         &self,
         identities: &mut &[BlockIdentity],
@@ -223,10 +251,7 @@ impl Worker {
             .load_body_prefix(body_reader.as_mut(), identities)
             .map_err(DerivedIndexWorkerError::Storage)?
         else {
-            if !state.batch.is_empty() {
-                *pending = Some(state.take(self.batch_limits));
-            }
-            return Ok(ChunkAction::Stalled);
+            return Ok(self.unavailable_body(capabilities, state, pending));
         };
         if self.runtime.should_stop() {
             return Ok(ChunkAction::Stalled);
@@ -234,25 +259,21 @@ impl Worker {
         let loaded = bodies.len();
         let sub_chunk = &identities[..loaded];
 
-        let anchors = if capabilities.contains(IndexCapability::ScriptLive) {
-            let mut anchors = Vec::with_capacity(sub_chunk.len());
-            for identity in sub_chunk {
-                match self.live_anchor(identity.height, identity.hash) {
-                    Ok(anchor) => anchors.push(anchor),
-                    Err(error @ DerivedIndexWorkerError::UndoUnavailable { .. }) => {
-                        *pending = None;
-                        self.writer
-                            .reset_capabilities(IndexCapabilities::SCRIPT_LIVE)
-                            .map_err(DerivedIndexWorkerError::Index)?;
-                        tracing::warn!(error = %error, "rebuilding ScriptLive after pruned undo");
-                        return Ok(ChunkAction::Stalled);
-                    }
-                    Err(error) => return Err(error),
+        let anchors = match self.spent_anchors(capabilities, sub_chunk) {
+            Ok(anchors) => anchors,
+            Err(error @ DerivedIndexWorkerError::UndoUnavailable { .. }) => {
+                *pending = None;
+                if capabilities.contains(IndexCapability::CompactFilter) {
+                    self.runtime.block_compact_filters(error.to_string(), true);
+                    return Ok(ChunkAction::Progressed);
                 }
+                self.writer
+                    .reset_capabilities(IndexCapabilities::SCRIPT_LIVE)
+                    .map_err(DerivedIndexWorkerError::Index)?;
+                tracing::warn!(error = %error, "rebuilding ScriptLive after pruned undo");
+                return Ok(ChunkAction::Stalled);
             }
-            Some(anchors)
-        } else {
-            None
+            Err(error) => return Err(error),
         };
 
         // Prepare blocks in parallel. Each call takes a shared read lock on the
@@ -378,10 +399,20 @@ impl Worker {
     /// view at the tip, so the reset alone sends it through that path.
     fn rebuild_from_pruned(
         &self,
-        capabilities: IndexCapabilities,
+        mut capabilities: IndexCapabilities,
         below: u32,
         target: &TipSnapshot,
     ) -> Result<ReconcileAction, DerivedIndexWorkerError> {
+        if capabilities.contains(IndexCapability::CompactFilter) {
+            self.runtime.block_compact_filters(
+                format!("compact filters require unavailable history below height {below}"),
+                false,
+            );
+            capabilities = capabilities.without(IndexCapability::CompactFilter);
+            if capabilities.is_empty() {
+                return Ok(ReconcileAction::Progressed);
+            }
+        }
         // `below` is at least 1: a refusal requires `floor < below` and no
         // floor is negative.
         let anchor_height = below - 1;
@@ -422,6 +453,27 @@ impl Worker {
             )
             .map_err(DerivedIndexWorkerError::Index)?;
         Ok(ReconcileAction::Progressed)
+    }
+
+    /// An optional historical gap must not hold back healthy sibling cursors.
+    fn unavailable_body(
+        &self,
+        capabilities: IndexCapabilities,
+        state: &mut PendingForward,
+        pending: &mut Option<PendingForward>,
+    ) -> ChunkAction {
+        if capabilities.contains(IndexCapability::CompactFilter) {
+            // Discard only uncommitted preparation. Durable filter records and
+            // its cursor remain untouched, and the quiet wait permits retry.
+            *pending = None;
+            self.runtime
+                .block_compact_filters("required compact-filter block body is unavailable", true);
+            return ChunkAction::Progressed;
+        }
+        if !state.batch.is_empty() {
+            *pending = Some(state.take(self.batch_limits));
+        }
+        ChunkAction::Stalled
     }
 
     /// Loads bodies for a prefix of `identities` in order, stopping once

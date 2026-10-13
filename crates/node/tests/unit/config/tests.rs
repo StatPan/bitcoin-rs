@@ -422,3 +422,41 @@ fn earlier_set_fields_survive_a_later_bare_network_selection() {
         "a field no layer set still fills from the winning profile"
     );
 }
+
+#[test]
+fn compact_filters_are_opt_in_and_require_retained_history() {
+    let mut config = resolved(&[]);
+    assert!(!config.indexes.block_filter_index);
+    assert!(!config.p2p.peer_block_filters);
+    config.p2p.peer_block_filters = true;
+    assert!(
+        config.validate().is_err(),
+        "serving requires a configured index"
+    );
+    config.indexes.block_filter_index = true;
+    assert!(config.validate().is_ok());
+    config.storage.prune_target_mb = 550;
+    assert!(
+        config.validate().is_err(),
+        "pruned backfill is explicitly unsupported"
+    );
+}
+
+#[test]
+fn basic_filter_option_accepts_core_spellings_and_rejects_unknown_types() {
+    for value in ["basic", "1", "true"] {
+        assert_eq!(
+            crate::options::parse_block_filter_index(value),
+            Ok(crate::config::BlockFilterIndexMode::Basic)
+        );
+    }
+    for value in ["0", "false", "off"] {
+        assert_eq!(
+            crate::options::parse_block_filter_index(value),
+            Ok(crate::config::BlockFilterIndexMode::Disabled)
+        );
+    }
+    for value in ["extended", "2", "basic,unknown"] {
+        assert!(crate::options::parse_block_filter_index(value).is_err());
+    }
+}

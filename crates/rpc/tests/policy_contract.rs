@@ -1634,6 +1634,7 @@ fn invalidation_handler(state: &NodeState) -> Handler {
         },
         indexes: IndexHandles {
             derived_index: None,
+            compact_filter: None,
             script_index: None,
             esplora_tx_index: None,
             derived_index_status: None,
@@ -1641,7 +1642,6 @@ fn invalidation_handler(state: &NodeState) -> Handler {
         network: NetworkHandles {
             peer_table: state.peer_table(),
             p2p: state.p2p(),
-            local_services: state.p2p().local_services().to_u64(),
         },
         mining: MiningHandles {
             mining_control: None,

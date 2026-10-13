@@ -1,14 +1,92 @@
 //! Derived-index query contract: typed errors, progress info, and the
 //! object-safe read traits the RPC surface and node composition consume.
 //!
-//! These are index-owned contracts — answers are complete only at a durable
-//! watermark equal to the applied tip. `bitcoin_rs_rpc::context` re-exports
-//! them under its historical paths.
+//! These are index-owned contracts. Transaction/script answers and compact-filter
+//! ranges require a durable watermark equal to the applied tip. A single retained
+//! filter can be read by exact block identity during lag; health, integrity, and
+//! snapshot checks still apply. `bitcoin_rs_rpc::context` re-exports the existing
+//! transaction/script contracts under their historical paths.
 
 use bitcoin_rs_primitives::{OutPoint, Tx, Txid};
 use compact_str::CompactString;
 
 use crate::ScriptHash;
+
+/// Failure of a snapshot-gated basic-filter query. Surface adapters own wire codes.
+#[derive(Clone, Debug, thiserror::Error, PartialEq, Eq)]
+pub enum FilterQueryError {
+    /// Basic indexing was not configured.
+    #[error("basic block filter index is disabled")]
+    Disabled,
+    /// The block hash is absent from the block tree.
+    #[error("block not found")]
+    UnknownBlock,
+    /// The known block has never been applied, or has been invalidated.
+    #[error("block was not connected to the active chain")]
+    NotConnected,
+    /// The required durable filter coverage is still being built.
+    #[error("block filters are still being indexed")]
+    Indexing,
+    /// Chain or runtime identity changed while assembling the answer.
+    #[error("compact filter query changed; retry")]
+    Retry,
+    /// A reversed or protocol-oversized range was requested.
+    #[error("invalid compact filter range")]
+    InvalidRange,
+    /// A stopped, failed, opening, blocked, or locally budget-limited capability.
+    #[error("compact filter index unavailable: {0}")]
+    Unavailable(CompactString),
+    /// Missing expected data, unsupported record format, or inconsistent linkage.
+    #[error("compact filter index corrupt: {0}")]
+    Corrupt(CompactString),
+    /// The storage backend could not complete a read.
+    #[error("compact filter storage error: {0}")]
+    Storage(CompactString),
+}
+
+/// One complete BIP157 hash range; all hashes use consensus little-endian bytes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FilterHashRange {
+    /// Filter header immediately before the first requested block; zero at genesis.
+    pub previous_header: [u8; 32],
+    /// Filter hashes, rather than filter headers, in ascending block-height order.
+    pub hashes: Vec<[u8; 32]>,
+}
+
+/// Read-only basic-filter capability. No storage or worker mutation is exposed.
+pub trait CompactFilterQuery: Send + Sync {
+    /// Durable progress; `synced` additionally certifies the exact tip record.
+    fn filter_index_info(&self) -> Result<DerivedIndexInfo, FilterQueryError>;
+    /// Reads one retained, validated block, including stale blocks and during lag.
+    fn filter(
+        &self,
+        block: bitcoin_rs_primitives::BlockHash,
+    ) -> Result<crate::CompactFilterRecord, FilterQueryError>;
+    /// Reads at most 2,000 hashes on the chain ending at `stop`, when synchronized.
+    fn filter_hashes(
+        &self,
+        start: u32,
+        stop: bitcoin_rs_primitives::BlockHash,
+    ) -> Result<FilterHashRange, FilterQueryError>;
+    /// Headers at positive multiples of 1,000 on `stop`'s ancestry.
+    fn checkpoint_headers(
+        &self,
+        stop: bitcoin_rs_primitives::BlockHash,
+    ) -> Result<Vec<[u8; 32]>, FilterQueryError>;
+    /// Streams at most 1,000 exact-identity records, with one filter materialized.
+    ///
+    /// `headroom` runs before every filter load. `Break` means production stopped,
+    /// never successful completion. An error can follow earlier emissions; the
+    /// caller must terminate an interrupted response rather than silently omit it.
+    /// Callbacks run outside tree and chain-transition locks and must not block.
+    fn stream_filters(
+        &self,
+        start: u32,
+        stop: bitcoin_rs_primitives::BlockHash,
+        headroom: &dyn Fn() -> bool,
+        emit: &mut dyn FnMut(crate::CompactFilterRecord) -> core::ops::ControlFlow<()>,
+    ) -> Result<core::ops::ControlFlow<()>, FilterQueryError>;
+}
 
 /// Actual progress reported by the node-owned transaction index.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

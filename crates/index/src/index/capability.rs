@@ -12,6 +12,9 @@ pub(super) const SCRIPT_HISTORY_WATERMARK_KEY: &[u8] = &[0x00, b'S'];
 
 pub(super) const SCRIPT_LIVE_WATERMARK_KEY: &[u8] = &[0x00, b'L'];
 
+/// Independent filter cursor; filter records use the ASCII `F` prefix.
+pub(super) const COMPACT_FILTER_WATERMARK_KEY: &[u8] = &[0x00, b'F'];
+
 /// `TxLookup` coverage floor: first height with derived rows.
 pub(super) const TX_LOOKUP_FLOOR_KEY: &[u8] = &[0x00, b't'];
 
@@ -22,13 +25,13 @@ pub(super) const WATERMARK_LEN: usize = crate::types::HEIGHT_SIZE + 32;
 
 /// The durable floor key for a capability, when it carries one.
 ///
-/// `ScriptLive` reseeds from the authoritative UTXO view and can never hold a
-/// pruned-prefix floor, so it has no key.
+/// `ScriptLive` reseeds from the authoritative UTXO view. Compact-filter headers
+/// must chain from genesis. Neither capability permits a pruned-prefix floor.
 pub(super) const fn floor_key(capability: IndexCapability) -> Option<&'static [u8]> {
     match capability {
         IndexCapability::TxLookup => Some(TX_LOOKUP_FLOOR_KEY),
         IndexCapability::ScriptHistory => Some(SCRIPT_HISTORY_FLOOR_KEY),
-        IndexCapability::ScriptLive => None,
+        IndexCapability::ScriptLive | IndexCapability::CompactFilter => None,
     }
 }
 
@@ -52,61 +55,78 @@ pub enum IndexCapability {
     /// filed under its script. Rebuildable from the authoritative UTXO
     /// set alone, unlike history.
     ScriptLive,
+    /// Persisted BIP158 basic filters and chained BIP157 filter headers.
+    CompactFilter,
 }
 
 impl IndexCapability {
     /// Every capability in mask-bit and report order.
     ///
-    /// POST: distinct entries, ordered `TxLookup`, `ScriptHistory`, `ScriptLive`.
+    /// POST: distinct entries, ordered `TxLookup`, `ScriptHistory`, `ScriptLive`, `CompactFilter`.
     /// INVARIANT: this order is load-bearing; the query-refusal text and the
     /// index-ahead capability label follow it.
-    pub(crate) const ALL: [Self; 3] = [Self::TxLookup, Self::ScriptHistory, Self::ScriptLive];
+    pub(crate) const ALL: [Self; 4] = [
+        Self::TxLookup,
+        Self::ScriptHistory,
+        Self::ScriptLive,
+        Self::CompactFilter,
+    ];
+
+    /// Legacy transaction and script capabilities, without compact filters.
+    pub(crate) const TX_SCRIPT: [Self; 3] = [Self::TxLookup, Self::ScriptHistory, Self::ScriptLive];
 
     /// POST: the single mask bit this capability owns, matching the persisted
-    /// reset-marker mask (`TxLookup` 0b001, `ScriptHistory` 0b010, `ScriptLive` 0b100).
+    /// reset-marker mask (`TxLookup` 0b0001, `ScriptHistory` 0b0010,
+    /// `ScriptLive` 0b0100, `CompactFilter` 0b1000).
     pub(super) const fn bit(self) -> u8 {
         match self {
             Self::TxLookup => 0b001,
             Self::ScriptHistory => 0b010,
             Self::ScriptLive => 0b100,
+            Self::CompactFilter => 0b1000,
         }
     }
 
-    /// POST: the position of this capability in [`Self::ALL`], 0 to 2.
+    /// POST: the position of this capability in [`Self::ALL`], 0 to 3.
     pub(crate) const fn index(self) -> usize {
         match self {
             Self::TxLookup => 0,
             Self::ScriptHistory => 1,
             Self::ScriptLive => 2,
+            Self::CompactFilter => 3,
         }
     }
 
-    /// The persisted watermark key (`T`, `S`, or `L` under `0x00`).
+    /// The persisted watermark key (`T`, `S`, `L`, or `F` under `0x00`).
     pub(super) const fn watermark_key(self) -> &'static [u8] {
         match self {
             Self::TxLookup => TX_LOOKUP_WATERMARK_KEY,
             Self::ScriptHistory => SCRIPT_HISTORY_WATERMARK_KEY,
             Self::ScriptLive => SCRIPT_LIVE_WATERMARK_KEY,
+            Self::CompactFilter => COMPACT_FILTER_WATERMARK_KEY,
         }
     }
 
-    /// POST: the column families this capability occupies
+    /// POST: the exclusive column families this capability occupies
     /// (`TxLookup`: `TxConfirmed`; `ScriptHistory`: Funding, Spending;
-    /// `ScriptLive`: `ScriptLive`).
+    /// `ScriptLive`: `ScriptLive`; filters use a prefix inside shared metadata).
     pub(super) const fn column_families(self) -> &'static [ColumnFamily] {
         match self {
             Self::TxLookup => &[ColumnFamily::TxConfirmed],
             Self::ScriptHistory => &[ColumnFamily::Funding, ColumnFamily::Spending],
             Self::ScriptLive => &[ColumnFamily::ScriptLive],
+            // UtxoMeta also owns sibling metadata: reset only the filter prefix.
+            Self::CompactFilter => &[],
         }
     }
 
-    /// POST: the display name (`tx_lookup`, `script_history`, `script_live`).
+    /// POST: the stable capability display name.
     pub(crate) const fn name(self) -> &'static str {
         match self {
             Self::TxLookup => "tx_lookup",
             Self::ScriptHistory => "script_history",
             Self::ScriptLive => "script_live",
+            Self::CompactFilter => "compact_filter",
         }
     }
 
@@ -116,6 +136,7 @@ impl IndexCapability {
             Self::TxLookup => "txindex is disabled",
             Self::ScriptHistory => "script history is disabled",
             Self::ScriptLive => "script live is disabled",
+            Self::CompactFilter => "compact filter is disabled",
         }
     }
 }
@@ -142,15 +163,19 @@ impl IndexCapabilities {
     pub const SCRIPT_HISTORY: Self = Self(IndexCapability::ScriptHistory.bit());
     /// `ScriptIndex` live outputs only.
     pub const SCRIPT_LIVE: Self = Self(IndexCapability::ScriptLive.bit());
+    /// BIP158 basic filters only.
+    pub const COMPACT_FILTER: Self = Self(IndexCapability::CompactFilter.bit());
     /// Node `--txindex` plus `--scriptindex=utxo`.
     pub const TX_LOOKUP_SCRIPT_LIVE: Self =
         Self(IndexCapability::TxLookup.bit() | IndexCapability::ScriptLive.bit());
-    /// Every index capability, including the compact live view.
-    pub const ALL: Self = Self(0b111);
+    /// Legacy transaction and script capabilities, without compact filters.
+    pub const TX_SCRIPT: Self = Self(0b111);
+    /// Every index capability, including BIP158 basic filters.
+    pub const ALL: Self = Self(0b1111);
     /// Every capability derivable from a block body alone.
     ///
-    /// Anchorless paths use this, because `ScriptLive` cannot be prepared
-    /// without a spent-coin script source.
+    /// Anchorless paths use this: live outputs and compact filters need an
+    /// authoritative spent-coin script source.
     pub const HISTORICAL: Self =
         Self(IndexCapability::TxLookup.bit() | IndexCapability::ScriptHistory.bit());
 
@@ -158,6 +183,12 @@ impl IndexCapabilities {
     #[must_use]
     pub(crate) const fn contains(self, capability: IndexCapability) -> bool {
         self.0 & capability.bit() != 0
+    }
+
+    /// Combines two named capability selections without changing their mask meanings.
+    #[must_use]
+    pub const fn union(self, other: Self) -> Self {
+        Self(self.0 | other.0)
     }
 
     /// POST: whether no capability is selected.
@@ -192,9 +223,10 @@ impl IndexCapabilities {
     /// Mode demotion (`full` → `utxo`) and an explicit-`txindex` independence
     /// change leave durable rows behind. Those leftover families are reset
     /// and rebuilt or discarded; they are never served as if still configured.
+    /// Compact filters are retained when disabled and never demoted this way.
     #[must_use]
     pub fn leftover(self, watermarks: IndexWatermarks) -> Self {
-        IndexCapability::ALL
+        IndexCapability::TX_SCRIPT
             .into_iter()
             .filter(|&capability| {
                 !self.contains(capability) && watermarks.get(capability).is_some()
@@ -208,10 +240,10 @@ impl IndexCapabilities {
 
     /// POST: the set the mask encodes, or
     /// [`IndexError::InvalidResetMarker`] when `mask` is 0 or any bit above
-    /// bit 2 is set.
+    /// bit 3 is set.
     pub(super) fn from_mask(mask: u8) -> Result<Self, IndexError> {
-        // An older marker without bit 2 has no live rows to reset.
-        if mask == 0 || mask & !0b111 != 0 {
+        // Absent bits in older markers never request newer capability resets.
+        if mask == 0 || mask & !0b1111 != 0 {
             return Err(IndexError::InvalidResetMarker);
         }
         Ok(Self(mask))
@@ -230,6 +262,7 @@ pub struct IndexWatermarks {
     pub tx_lookup: Option<IndexWatermark>,
     pub script_history: Option<IndexWatermark>,
     pub script_live: Option<IndexWatermark>,
+    pub compact_filter: Option<IndexWatermark>,
 }
 
 impl IndexWatermarks {
@@ -239,6 +272,7 @@ impl IndexWatermarks {
             IndexCapability::TxLookup => self.tx_lookup,
             IndexCapability::ScriptHistory => self.script_history,
             IndexCapability::ScriptLive => self.script_live,
+            IndexCapability::CompactFilter => self.compact_filter,
         }
     }
 
@@ -252,6 +286,7 @@ impl IndexWatermarks {
             IndexCapability::TxLookup => self.tx_lookup = cursor,
             IndexCapability::ScriptHistory => self.script_history = cursor,
             IndexCapability::ScriptLive => self.script_live = cursor,
+            IndexCapability::CompactFilter => self.compact_filter = cursor,
         }
     }
 }
@@ -283,6 +318,20 @@ impl IndexWatermark {
         })
     }
 
+    /// Preserves legacy watermark errors while classifying the optional filter locally.
+    pub(super) fn from_capability_bytes(
+        bytes: &[u8],
+        capability: IndexCapability,
+    ) -> Result<Self, IndexError> {
+        Self::from_bytes(bytes).map_err(|error| {
+            if capability == IndexCapability::CompactFilter {
+                IndexError::InvalidCompactFilterWatermark
+            } else {
+                error
+            }
+        })
+    }
+
     /// Reads the durable watermark from a snapshot without requiring a writer handle.
     pub(crate) fn read_from_snapshot(
         snapshot: &dyn KvSnapshot,
@@ -292,7 +341,7 @@ impl IndexWatermark {
         snapshot
             .get(ColumnFamily::UtxoMeta, key)?
             .as_deref()
-            .map(Self::from_bytes)
+            .map(|bytes| Self::from_capability_bytes(bytes, capability))
             .transpose()
     }
 }
@@ -412,6 +461,15 @@ mod tests {
                 "script_live",
                 "script live is disabled",
             ),
+            (
+                IndexCapability::CompactFilter,
+                0b1000,
+                3,
+                COMPACT_FILTER_WATERMARK_KEY,
+                &[][..],
+                "compact_filter",
+                "compact filter is disabled",
+            ),
         ] {
             assert_eq!(capability.bit(), bit);
             assert_eq!(capability.index(), index);
@@ -430,6 +488,7 @@ mod tests {
                 IndexCapability::TxLookup,
                 IndexCapability::ScriptHistory,
                 IndexCapability::ScriptLive,
+                IndexCapability::CompactFilter,
             ]
         );
         for (position, capability) in IndexCapability::ALL.into_iter().enumerate() {
@@ -439,13 +498,15 @@ mod tests {
     }
 
     /// The reset marker round-trips byte-identically and refuses an empty
-    /// mask and any bit above bit 2.
+    /// mask and any bit above bit 3.
     #[test]
     fn reset_marker_mask_round_trips_and_refuses_invalid_masks() {
         for selection in [
             IndexCapabilities::TX_LOOKUP,
             IndexCapabilities::SCRIPT_HISTORY,
             IndexCapabilities::SCRIPT_LIVE,
+            IndexCapabilities::COMPACT_FILTER,
+            IndexCapabilities::TX_SCRIPT,
             IndexCapabilities::HISTORICAL,
             IndexCapabilities::ALL,
         ] {
@@ -461,7 +522,7 @@ mod tests {
             IndexCapabilities::from_mask(0),
             Err(IndexError::InvalidResetMarker)
         ));
-        for mask in [0b1000_u8, 0b0001_0000, 0b1001, 0b1111] {
+        for mask in [0b1_0000_u8, 0b10_0000, 0b1_0001, 0b1_1111] {
             assert!(
                 IndexCapabilities::from_mask(mask).is_err(),
                 "mask {mask:#b} must be refused"

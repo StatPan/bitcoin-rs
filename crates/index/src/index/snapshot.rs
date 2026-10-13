@@ -55,6 +55,24 @@ pub trait TxIndexSnapshot: Send + Sync {
         let _ = capability;
         Ok(0)
     }
+    /// Reads fixed-size filter metadata without loading the serialized filter blob.
+    /// This does not assert active-chain readiness; callers must gate the watermark.
+    fn compact_filter_metadata(
+        &self,
+        block: IndexWatermark,
+    ) -> Result<Option<super::filter::CompactFilterMetadata>, IndexError> {
+        let _ = block;
+        Ok(None)
+    }
+    /// Reads a retained immutable filter by exact height and block hash.
+    /// This does not assert active-chain readiness; callers must gate the watermark.
+    fn compact_filter(
+        &self,
+        block: IndexWatermark,
+    ) -> Result<Option<super::filter::CompactFilterRecord>, IndexError> {
+        let _ = block;
+        Ok(None)
+    }
     /// Scans confirmed-transaction rows for `txid`.
     fn transaction_rows(
         &self,
@@ -123,6 +141,20 @@ impl TxIndexSnapshot for StoreTxIndexSnapshot<'_> {
 
     fn capability_floor(&self, capability: IndexCapability) -> Result<u32, IndexError> {
         crate::index::capability::read_coverage_floor(self.snapshot.as_ref(), capability)
+    }
+
+    fn compact_filter_metadata(
+        &self,
+        block: IndexWatermark,
+    ) -> Result<Option<super::filter::CompactFilterMetadata>, IndexError> {
+        super::filter::CompactFilterMetadata::read(self.snapshot.as_ref(), block)
+    }
+
+    fn compact_filter(
+        &self,
+        block: IndexWatermark,
+    ) -> Result<Option<super::filter::CompactFilterRecord>, IndexError> {
+        super::filter::CompactFilterRecord::read(self.snapshot.as_ref(), block)
     }
 
     fn transaction_rows(

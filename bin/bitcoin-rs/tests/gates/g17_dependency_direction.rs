@@ -54,6 +54,10 @@ pub fn observe_sync(chain: &dyn SyncChain) -> Option<Arc<TipSnapshot>> {
 
 #[test]
 fn workspace_dependency_direction_is_one_way() {
+    // ARCH-01: optional BIP157 serving consumes the index-owned read trait;
+    // neither crate changes layer, and the live graph below must remain acyclic.
+    assert_eq!(dependency_graph::approved_layer("bitcoin-rs-p2p"), 2);
+    assert_eq!(dependency_graph::approved_layer("bitcoin-rs-index"), 2);
     let graph = WorkspaceGraph::from_cargo_metadata();
     assert!(
         graph.classified >= 12,

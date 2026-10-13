@@ -4,9 +4,9 @@ use super::{
     block::NoSpentScripts, block::SpentCoinScripts, capability::IndexCapabilities,
     capability::IndexCapability, capability::IndexWatermark, capability::IndexWatermarks,
     capability::SCRIPT_LIVE_WATERMARK_KEY, capability::put_selected_watermarks,
-    capability::selected_watermark, error::IndexError, prepared::PreparedBatch,
-    prepared::PreparedBatchLimits, reader::Indexer, rows::PendingRows, rows::delete_rows,
-    rows::put_rows, state::CONSUMER_CURSOR_KEY, state::ConsumerCursorUpdate,
+    capability::selected_watermark, error::IndexError, filter::CompactFilterRecord,
+    prepared::PreparedBatch, prepared::PreparedBatchLimits, reader::Indexer, rows::PendingRows,
+    rows::delete_rows, rows::put_rows, state::CONSUMER_CURSOR_KEY, state::ConsumerCursorUpdate,
     state::FORMAT_VERSION_KEY, state::FORMAT_VERSION_VALUE, state::IndexWriteFence,
     state::capture_write_fence, state::commit_ordinary, state::ensure_fence_live,
     state::resume_capability_reset,
@@ -31,10 +31,11 @@ impl<S: KvStore> IndexWriter<S> {
 
     /// Opens a writer over `store`, rejecting unversioned index tables.
     ///
-    /// Format 5 changed every row family (big-endian heights, 43-byte live
-    /// rows, 6-byte positions), so any older marker is
-    /// [`IndexError::UnsupportedTxIndexFormatVersion`]; recovery full-resets
-    /// the store for rebuild. No in-place upgrade path exists.
+    /// Format 5 changed legacy transaction/script row families (big-endian
+    /// heights, 43-byte live rows, 6-byte positions), so an older marker is
+    /// [`IndexError::UnsupportedTxIndexFormatVersion`]. Recovery resets those
+    /// families for rebuild while preserving independently versioned immutable
+    /// filters. No in-place upgrade path exists.
     pub fn open(store: std::sync::Arc<S>, generation: u64) -> Result<Self, IndexError> {
         let indexer = Indexer::new(store);
         match indexer
@@ -82,15 +83,17 @@ impl<S: KvStore> IndexWriter<S> {
     /// state and re-capture.
     pub fn fenced_watermarks(&mut self) -> Result<(IndexWriteFence, IndexWatermarks), IndexError> {
         let fence = capture_write_fence(self.indexer.store.as_ref(), self.generation)?;
-        Ok((fence, fence.watermarks))
+        let watermarks = fence.watermarks;
+        Ok((fence, watermarks))
     }
 
-    /// Resets every derived capability through the durable exact-claim fence.
+    /// Resets legacy transaction/script capabilities through the durable exact-claim fence.
+    /// Optional immutable filter records are preserved; their reset must be explicit.
     ///
-    /// A pre-existing selective reset is merged into the all-capability
+    /// A pre-existing selective reset is merged into the legacy-capability
     /// obligation before any row is deleted.
     pub fn reset_index(store: &S, generation: u64) -> Result<(), IndexError> {
-        resume_capability_reset(store, generation, IndexCapabilities::ALL.to_mask())
+        resume_capability_reset(store, generation, IndexCapabilities::TX_SCRIPT.to_mask())
     }
 
     /// Seeds the live view from a producer of compact locators.
@@ -244,7 +247,10 @@ impl<S: KvStore> IndexWriter<S> {
         watermark: IndexWatermark,
         floor: u32,
     ) -> Result<(), IndexError> {
-        if capabilities.is_empty() || capabilities.contains(IndexCapability::ScriptLive) {
+        if capabilities.is_empty()
+            || capabilities.contains(IndexCapability::ScriptLive)
+            || capabilities.contains(IndexCapability::CompactFilter)
+        {
             return Err(IndexError::AnchorUnsupportedSelection);
         }
         let fence = capture_write_fence(self.indexer.store.as_ref(), self.generation)?;
@@ -302,6 +308,10 @@ impl<S: KvStore> IndexWriter<S> {
 
     /// Atomically connects a bounded batch and applies one explicit consumer
     /// cursor disposition guarded by the captured reset-state fence.
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "a commit consumes the captured write fence; intentional reuse requires an explicit clone"
+    )]
     pub fn commit_forward_with_cursor(
         &mut self,
         fence: IndexWriteFence,
@@ -318,6 +328,13 @@ impl<S: KvStore> IndexWriter<S> {
             .ok_or(IndexError::NonContiguousPrepared {
                 watermark: fence.watermarks.tx_lookup,
             })?;
+        let snapshot = if capabilities.contains(IndexCapability::CompactFilter) {
+            ensure_fence_live(self.indexer.store.as_ref(), self.generation, &fence)?;
+            fence.check_compact_filter_watermark()?;
+            Some(self.indexer.store.snapshot()?)
+        } else {
+            None
+        };
         let current = selected_watermark(fence.watermarks, capabilities)?;
         let mut expected_height = match current {
             None => 0,
@@ -326,6 +343,13 @@ impl<S: KvStore> IndexWriter<S> {
                 .checked_add(1)
                 .ok_or(IndexError::NonContiguousPrepared { watermark: current })?,
         };
+        let mut previous_filter_header = match (&snapshot, current) {
+            (Some(snapshot), Some(block)) => {
+                CompactFilterRecord::require_validated(snapshot.as_ref(), block)?.filter_header
+            }
+            _ => [0; 32],
+        };
+        let mut store_batch = self.indexer.store.new_batch();
         let mut expected_parent = current.map(|w| w.hash);
         let mut merged = PendingRows::default();
         let mut last = None;
@@ -338,6 +362,19 @@ impl<S: KvStore> IndexWriter<S> {
                 if block.parent_hash != parent {
                     return Err(IndexError::NonContiguousPrepared { watermark: current });
                 }
+            }
+            if let (Some(snapshot), Some(filter)) = (&snapshot, block.filter) {
+                let record = CompactFilterRecord::new(
+                    IndexWatermark {
+                        height: block.height,
+                        hash: block.hash,
+                    },
+                    block.parent_hash,
+                    filter,
+                    previous_filter_header,
+                );
+                previous_filter_header = record.filter_header;
+                record.put_immutable(snapshot.as_ref(), &mut store_batch)?;
             }
             merged.append(block.rows);
             if block_index + 1 < block_count {
@@ -354,7 +391,7 @@ impl<S: KvStore> IndexWriter<S> {
         merged.sort();
         let final_watermark =
             last.ok_or(IndexError::NonContiguousPrepared { watermark: current })?;
-        let mut store_batch = self.indexer.store.new_batch();
+        drop(snapshot);
         put_rows(&mut store_batch, &merged);
         store_batch.put(
             ColumnFamily::UtxoMeta,
@@ -421,10 +458,16 @@ impl<S: KvStore> IndexWriter<S> {
         cursor: ConsumerCursorUpdate<'_>,
         spent_scripts: &dyn SpentCoinScripts,
     ) -> Result<(), IndexError> {
+        if capabilities == IndexCapabilities::COMPACT_FILTER {
+            return self.commit_compact_filter_rollback_with_cursor(fence, prev, cursor);
+        }
+        if capabilities.contains(IndexCapability::CompactFilter) {
+            self.check_compact_filter_rollback(&fence, prev)?;
+        }
         let current = selected_watermark(fence.watermarks, capabilities)?
             .ok_or(IndexError::NonContiguousPrepared { watermark: None })?;
         let prepared = self.prepare_block_with_spent_scripts(
-            capabilities,
+            capabilities.without(IndexCapability::CompactFilter),
             current.height,
             current.hash,
             body,
@@ -474,7 +517,7 @@ impl<S: KvStore> IndexWriter<S> {
         // A disabled capability may still point above this block on the same
         // disconnected prefix. Retain every ancestor identity it may need to
         // reconcile when it is enabled again.
-        let unselected_keeps_identity = IndexCapability::ALL.into_iter().any(|capability| {
+        let unselected_keeps_identity = IndexCapability::TX_SCRIPT.into_iter().any(|capability| {
             !capabilities.contains(capability)
                 && fence
                     .watermarks
@@ -506,6 +549,59 @@ impl<S: KvStore> IndexWriter<S> {
         Ok(())
     }
 
+    /// Rewinds only the active filter watermark, retaining immutable branch records.
+    /// The previous record and exact parent/header continuity must exist; no body or undo is read.
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "a commit consumes the captured write fence; intentional reuse requires an explicit clone"
+    )]
+    pub fn commit_compact_filter_rollback_with_cursor(
+        &mut self,
+        fence: IndexWriteFence,
+        prev: Option<IndexWatermark>,
+        cursor: ConsumerCursorUpdate<'_>,
+    ) -> Result<(), IndexError> {
+        self.check_compact_filter_rollback(&fence, prev)?;
+        let mut batch = self.indexer.store.new_batch();
+        put_selected_watermarks(&mut batch, IndexCapabilities::COMPACT_FILTER, prev);
+        match cursor {
+            ConsumerCursorUpdate::Keep => {}
+            ConsumerCursorUpdate::Set(bytes) => {
+                batch.put(ColumnFamily::UtxoMeta, CONSUMER_CURSOR_KEY, bytes);
+            }
+            ConsumerCursorUpdate::Clear => {
+                batch.delete(ColumnFamily::UtxoMeta, CONSUMER_CURSOR_KEY);
+            }
+        }
+        commit_ordinary(self.indexer.store.as_ref(), self.generation, &fence, batch)
+    }
+
+    fn check_compact_filter_rollback(
+        &self,
+        fence: &IndexWriteFence,
+        prev: Option<IndexWatermark>,
+    ) -> Result<(), IndexError> {
+        ensure_fence_live(self.indexer.store.as_ref(), self.generation, fence)?;
+        fence.check_compact_filter_watermark()?;
+        let current = fence
+            .watermarks
+            .compact_filter
+            .ok_or(IndexError::NonContiguousPrepared { watermark: None })?;
+        let snapshot = self.indexer.store.snapshot()?;
+        let record = CompactFilterRecord::require_validated(snapshot.as_ref(), current)?;
+        match prev {
+            Some(prev)
+                if current.height.checked_sub(1) == Some(prev.height)
+                    && record.parent_hash == prev.hash =>
+            {
+                CompactFilterRecord::require_validated(snapshot.as_ref(), prev)?;
+            }
+            None if current.height == 0 => {}
+            _ => return Err(IndexError::InvalidCompactFilterRecord),
+        }
+        Ok(())
+    }
+
     /// Loads the opaque consumer cursor bytes, or `None` when none is stored.
     ///
     /// The cursor is opaque to this crate: the owning consumer defines the
@@ -518,13 +614,17 @@ impl<S: KvStore> IndexWriter<S> {
             .get(ColumnFamily::UtxoMeta, CONSUMER_CURSOR_KEY)?)
     }
 
-    /// Publishes the opaque consumer cursor under five exact conditions from the
+    /// Publishes the opaque consumer cursor under six exact conditions from the
     /// captured fence: reset state, ordinary revision, and all watermark rows.
     /// The commit atomically advances the ordinary revision.
     ///
     /// A lost race with an unchanged reset returns
     /// [`IndexError::StaleIndexState`]. A moved reset cooperatively completes
     /// the pending exact claim and returns [`IndexError::ResetInProgress`].
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "a commit consumes the captured write fence; intentional reuse requires an explicit clone"
+    )]
     pub fn commit_consumer_cursor(
         &mut self,
         fence: IndexWriteFence,

@@ -212,6 +212,20 @@ impl OutboundBudget {
         )
     }
 
+    /// Filters share the body byte reserve and also require a message slot
+    /// before loading their blob. The extra bytes cover the filter envelope.
+    pub(crate) fn has_filter_production_headroom(&self) -> bool {
+        let messages = self.pending_messages.load(Ordering::Acquire);
+        messages < self.max_messages
+            && (messages == 0
+                || self
+                    .pending_bytes
+                    .load(Ordering::Acquire)
+                    .saturating_add(self.block_reserve)
+                    .saturating_add(42)
+                    <= self.max_bytes)
+    }
+
     /// Returns whether one more worst-case block body may be loaded.
     #[must_use]
     pub(crate) fn has_block_production_headroom(&self) -> bool {

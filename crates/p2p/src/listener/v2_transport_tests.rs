@@ -218,3 +218,47 @@ fn a_silent_responder_ends_at_the_handshake_deadline() -> TestResult {
     assert!(started.elapsed() < Duration::from_secs(10));
     Ok(())
 }
+
+#[test]
+fn both_handshake_directions_observe_current_compact_filter_readiness() -> TestResult {
+    let filters = Arc::new(crate::compact_filters::tests::Filters::default());
+    let (mut listener_shared, table) = shared(false);
+    listener_shared.compact_filters = Some(filters.clone());
+    let (addr, shutdown, handle) = listen(listener_shared)?;
+    let (mut client, _) = shared(false);
+    client.compact_filters = Some(filters.clone());
+    let base = ServiceFlags::NETWORK | ServiceFlags::WITNESS;
+    for (ready, failed) in [(false, false), (true, false), (true, true), (true, false)] {
+        filters.synced.store(ready, Ordering::Relaxed);
+        filters.failed.store(failed, Ordering::Relaxed);
+        let expected = if ready && !failed {
+            base | ServiceFlags::COMPACT_FILTERS
+        } else {
+            base
+        };
+        let stream = connect(addr)?;
+        let client_addr = stream.local_addr()?;
+        let mut peer = Peer::new(stream, MAGIC);
+        run_outbound_handshake(&mut peer, 27, 0, &lease(), deadline(), addr, &client)?;
+        assert_eq!(
+            peer.remote_version
+                .as_ref()
+                .ok_or("inbound version missing")?
+                .services,
+            expected
+        );
+        peer.send(&Message::Ping(101))?;
+        read_until(&mut peer, &Message::Pong(101))?;
+        assert_eq!(
+            table
+                .info_of(client_addr)
+                .ok_or("outbound version missing")?
+                .services,
+            expected.to_u64()
+        );
+    }
+    table.cancel_all();
+    shutdown.store(true, Ordering::Relaxed);
+    handle.join().map_err(|_| "listener panicked")?;
+    Ok(())
+}

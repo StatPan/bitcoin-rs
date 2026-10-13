@@ -96,6 +96,15 @@ pub struct DerivedIndexRuntime {
     wake_tx: Sender<()>,
     failure_message: RwLock<Option<CompactString>>,
     phase: arc_swap::ArcSwap<ReconcilePhase>,
+    compact_filter_unavailable: RwLock<Option<FilterUnavailable>>,
+}
+
+/// A filter-input/format gap is local to that optional capability. In
+/// particular it must not stop transaction or script index reconciliation.
+#[derive(Clone, Debug)]
+struct FilterUnavailable {
+    reason: CompactString,
+    retryable: bool,
 }
 
 impl DerivedIndexRuntime {
@@ -109,6 +118,7 @@ impl DerivedIndexRuntime {
             wake_tx,
             failure_message: RwLock::new(None),
             phase: arc_swap::ArcSwap::from_pointee(ReconcilePhase::FORWARD),
+            compact_filter_unavailable: RwLock::new(None),
         }
     }
 
@@ -168,6 +178,27 @@ impl DerivedIndexRuntime {
     #[must_use]
     pub(crate) fn failure_message(&self) -> Option<CompactString> {
         self.failure_message.read().clone()
+    }
+
+    fn block_compact_filters(&self, reason: impl Into<CompactString>, retryable: bool) {
+        *self.compact_filter_unavailable.write() = Some(FilterUnavailable {
+            reason: reason.into(),
+            retryable,
+        });
+    }
+
+    pub(crate) fn compact_filter_unavailable(&self) -> Option<CompactString> {
+        self.compact_filter_unavailable
+            .read()
+            .as_ref()
+            .map(|blocked| blocked.reason.clone())
+    }
+
+    fn retry_compact_filters(&self) {
+        let mut blocked = self.compact_filter_unavailable.write();
+        if blocked.as_ref().is_some_and(|blocked| blocked.retryable) {
+            *blocked = None;
+        }
     }
 }
 
@@ -466,6 +497,7 @@ pub trait IndexAheadSink: Send + Sync {
 /// The undo restores are precisely the external coins spent by the block and
 /// carry their full `script_pubkey`. Intra-block spends are absent because
 /// those outputs never entered the committed UTXO set.
+#[derive(Default)]
 pub(crate) struct UndoScripts {
     scripts: hashbrown::HashMap<([u8; 32], u32), Vec<u8>>,
 }
@@ -605,7 +637,7 @@ impl PendingForward {
     /// Transfers retained rows without changing their fence or flush deadline.
     fn take(&mut self, limits: PreparedBatchLimits) -> Self {
         let replacement = Self {
-            fence: self.fence,
+            fence: self.fence.clone(),
             watermarks: self.watermarks,
             capabilities: self.capabilities,
             durable: self.durable,
@@ -737,3 +769,6 @@ mod integration_tests;
 #[cfg(all(test, feature = "fjall"))]
 #[expect(clippy::expect_used, clippy::panic)]
 mod recovery_tests;
+
+#[cfg(all(test, feature = "fjall"))]
+mod filter_tests;

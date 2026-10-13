@@ -26,6 +26,8 @@ pub struct PreparedBlock {
     pub(super) capabilities: IndexCapabilities,
     /// Row mutations retained from the serialized body.
     pub(super) rows: PendingRows,
+    /// Enabled-only filter bytes; header chaining belongs to the sequential commit.
+    pub(super) filter: Option<Vec<u8>>,
 }
 
 impl PreparedBlock {

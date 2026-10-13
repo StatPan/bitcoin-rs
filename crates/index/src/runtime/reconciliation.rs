@@ -38,6 +38,9 @@ impl Worker {
                 {
                     break;
                 }
+                if self.enabled.contains(IndexCapability::CompactFilter) {
+                    self.runtime.retry_compact_filters();
+                }
             }
 
             let revision_before = self.runtime.revision();
@@ -118,7 +121,16 @@ impl Worker {
         &self,
         pending: &mut Option<PendingForward>,
     ) -> Result<ReconcileAction, DerivedIndexWorkerError> {
-        let action = self.reconcile_pass(pending)?;
+        let action = match self.reconcile_pass(pending) {
+            Err(DerivedIndexWorkerError::Index(error)) if error.is_compact_filter_error() => {
+                let retryable = matches!(error, IndexError::CompactFilterBuild(_));
+                self.runtime
+                    .block_compact_filters(error.to_string(), retryable);
+                *pending = None;
+                return Ok(ReconcileAction::Progressed);
+            }
+            result => result?,
+        };
         if !matches!(action, ReconcileAction::CaughtUp) {
             return Ok(action);
         }
@@ -138,6 +150,11 @@ impl Worker {
             return Ok(ReconcileAction::Progressed);
         }
         self.runtime.publish_phase(ReconcilePhase::FORWARD);
+        if self.enabled.contains(IndexCapability::CompactFilter)
+            && self.runtime.compact_filter_unavailable().is_some()
+        {
+            return Ok(ReconcileAction::Stalled);
+        }
         Ok(ReconcileAction::CaughtUp)
     }
 
@@ -158,7 +175,7 @@ impl Worker {
         }
 
         if pending.is_some() {
-            return self.reconcile_pending(pending, fence, watermarks, target.as_deref());
+            return self.reconcile_pending(pending, &fence, watermarks, target.as_deref());
         }
 
         let mut fence = fence;
@@ -184,7 +201,9 @@ impl Worker {
                     target.tip_id,
                 )
             });
-            if depth.is_some_and(|depth| depth > self.rollback_rebuild_cutover) {
+            if !capabilities.contains(IndexCapability::CompactFilter)
+                && depth.is_some_and(|depth| depth > self.rollback_rebuild_cutover)
+            {
                 tracing::warn!(
                     depth,
                     cutover = self.rollback_rebuild_cutover,
@@ -291,7 +310,7 @@ impl Worker {
     pub(super) fn reconcile_pending(
         &self,
         pending: &mut Option<PendingForward>,
-        fence: IndexWriteFence,
+        fence: &IndexWriteFence,
         watermarks: IndexWatermarks,
         target: Option<&TipSnapshot>,
     ) -> Result<ReconcileAction, DerivedIndexWorkerError> {
@@ -300,7 +319,7 @@ impl Worker {
         };
         // Any fence change invalidates the retained rows. Discard them and
         // re-derive from the new reset, revision, and watermark state.
-        if fence != state.fence {
+        if fence != &state.fence {
             *pending = None;
             return Ok(ReconcileAction::Stalled);
         }
@@ -340,7 +359,7 @@ impl Worker {
             }
             return self.catch_up_to(
                 target,
-                state.fence,
+                state.fence.clone(),
                 state.watermarks,
                 state.durable,
                 state.capabilities,
@@ -363,6 +382,13 @@ impl Worker {
             .writer
             .fenced_watermarks()
             .map_err(DerivedIndexWorkerError::Index)?;
+        // An opaque, malformed optional cursor must not poison sibling
+        // indexes. Its exact bytes remain in the fence for every commit.
+        if self.enabled.contains(IndexCapability::CompactFilter)
+            && let Err(error) = fence.check_compact_filter_watermark()
+        {
+            self.runtime.block_compact_filters(error.to_string(), false);
+        }
         let target = self.applied_tip.load_full();
         Ok((target, fence, watermarks))
     }
@@ -372,9 +398,17 @@ impl Worker {
         watermarks: IndexWatermarks,
         target: Option<&TipSnapshot>,
     ) -> Option<(IndexCapabilities, IndexWatermark)> {
+        // Immutable filter records survive rollback, and need neither body
+        // nor undo. Rewind this capability independently of body-derived rows.
+        if self.enabled.contains(IndexCapability::CompactFilter)
+            && self.runtime.compact_filter_unavailable().is_none()
+            && let Some(mark) = watermarks.compact_filter
+            && target.is_none_or(|target| !self.watermark_is_on_target_chain(mark, target))
+        {
+            return Some((IndexCapabilities::COMPACT_FILTER, mark));
+        }
         let enabled_watermark = |capability: IndexCapability| {
-            self.enabled
-                .contains(capability)
+            (capability != IndexCapability::CompactFilter && self.enabled.contains(capability))
                 .then_some(watermarks.get(capability))
                 .flatten()
         };
@@ -398,9 +432,11 @@ impl Worker {
         watermarks: IndexWatermarks,
         target: &TipSnapshot,
     ) -> Option<(IndexCapabilities, Option<IndexWatermark>)> {
+        let filters_blocked = self.enabled.contains(IndexCapability::CompactFilter)
+            && self.runtime.compact_filter_unavailable().is_some();
         let enabled_watermark = |capability: IndexCapability| {
-            self.enabled
-                .contains(capability)
+            (self.enabled.contains(capability)
+                && !(capability == IndexCapability::CompactFilter && filters_blocked))
                 .then_some(watermarks.get(capability))
         };
         let needs_forward = |watermark: Option<IndexWatermark>| {

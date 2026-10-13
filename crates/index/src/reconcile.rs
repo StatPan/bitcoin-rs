@@ -94,11 +94,11 @@ pub(crate) enum ReconcileLeg {
 
 /// Reconciliation legs of every capability the worker owns.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub(crate) struct ReconcilePhase([ReconcileLeg; 3]);
+pub(crate) struct ReconcilePhase([ReconcileLeg; 4]);
 
 impl ReconcilePhase {
     /// Every capability moving forward.
-    pub(crate) const FORWARD: Self = Self([ReconcileLeg::Forward; 3]);
+    pub(crate) const FORWARD: Self = Self([ReconcileLeg::Forward; 4]);
 
     /// Returns the phase with `leg` assigned to every capability in
     /// `capabilities`.
@@ -110,6 +110,15 @@ impl ReconcilePhase {
             self.0[capability.index()] = leg;
         }
         self
+    }
+
+    /// Projects phases onto the capabilities a status consumer actually owns.
+    pub(crate) fn for_capabilities(self, capabilities: IndexCapabilities) -> Self {
+        let mut selected = Self::FORWARD;
+        for capability in capabilities.iter() {
+            selected.0[capability.index()] = self.0[capability.index()];
+        }
+        selected
     }
 
     /// Capabilities whose rows are rebuilding from genesis.
@@ -189,4 +198,32 @@ pub(crate) fn selected_watermark(
 pub trait ChainCursorSource: Send + Sync {
     /// Returns the current consumer-visible chain cursor.
     fn cursor(&self) -> ConsumerCursor;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn filter_reconciliation_does_not_change_transaction_status() {
+        let phase = ReconcilePhase::FORWARD.with_leg(
+            IndexCapabilities::COMPACT_FILTER,
+            ReconcileLeg::RollingBack {
+                from_height: 10,
+                to_height: 5,
+            },
+        );
+        assert_eq!(phase.rolling_back(), Some((10, 5)));
+        assert_eq!(
+            phase.for_capabilities(IndexCapabilities::TX_SCRIPT),
+            ReconcilePhase::FORWARD
+        );
+        let phase = phase.with_leg(IndexCapabilities::COMPACT_FILTER, ReconcileLeg::Rebuilding);
+        assert_eq!(
+            phase
+                .for_capabilities(IndexCapabilities::TX_SCRIPT)
+                .rebuilding(),
+            IndexCapabilities::NONE
+        );
+    }
 }

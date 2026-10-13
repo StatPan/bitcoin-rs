@@ -636,7 +636,6 @@ fn mining_handler(state: &NodeState) -> Handler {
         network: NetworkHandles {
             peer_table: state.peer_table(),
             p2p: state.p2p(),
-            local_services: state.p2p().local_services().to_u64(),
         },
         mining: MiningHandles {
             mining_control: Some(mining_control),

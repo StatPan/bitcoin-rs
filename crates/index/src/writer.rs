@@ -61,6 +61,14 @@ pub(crate) trait TxIndexWriter: Send + Sync {
         spent_scripts: &dyn SpentCoinScripts,
     ) -> Result<(), IndexError>;
 
+    /// Rewinds the filter cursor using immutable records, without a block body or undo.
+    fn commit_compact_filter_rollback_with_cursor(
+        &self,
+        fence: IndexWriteFence,
+        prev: Option<IndexWatermark>,
+        cursor: ConsumerCursorUpdate<'_>,
+    ) -> Result<(), IndexError>;
+
     /// Resets only the selected derived row families through the durable reset protocol.
     fn reset_capabilities(&self, capabilities: IndexCapabilities) -> Result<(), IndexError>;
     /// Stamps `watermark` on the selected capabilities so a rebuild starts at
@@ -148,6 +156,16 @@ where
                 cursor,
                 spent_scripts,
             )
+    }
+
+    fn commit_compact_filter_rollback_with_cursor(
+        &self,
+        fence: IndexWriteFence,
+        prev: Option<IndexWatermark>,
+        cursor: ConsumerCursorUpdate<'_>,
+    ) -> Result<(), IndexError> {
+        self.write()
+            .commit_compact_filter_rollback_with_cursor(fence, prev, cursor)
     }
 
     fn reset_capabilities(&self, capabilities: IndexCapabilities) -> Result<(), IndexError> {

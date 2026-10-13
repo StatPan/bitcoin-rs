@@ -10,9 +10,10 @@ use crate::{IndexError, IndexWriter};
 
 /// Opens an `IndexWriter` with legacy/unsupported-format recovery.
 ///
-/// Any marker older than the current format 5 full-resets for rebuild: every
-/// row family changed, so no in-place upgrade path exists. Cursorless legacy
-/// tables reset the same way.
+/// A marker older than format 5 resets legacy transaction/script families for
+/// rebuild because their layouts changed. Independently versioned immutable
+/// filters remain preserved. Cursorless legacy tables reset the same way;
+/// no in-place upgrade path exists.
 pub(crate) fn open_writer<S>(store: &Arc<S>, generation: u64) -> Result<IndexWriter<S>, IndexError>
 where
     S: bitcoin_rs_storage::KvStore,

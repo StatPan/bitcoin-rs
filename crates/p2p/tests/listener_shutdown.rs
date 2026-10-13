@@ -140,6 +140,7 @@ fn wiring(peer_table: Arc<PeerTable>) -> ConnectionShared {
         blocks_tx,
         None,
         None,
+        None,
         ListenerExtras::default(),
     )
 }

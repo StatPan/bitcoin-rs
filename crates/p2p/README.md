@@ -4,6 +4,19 @@ The Bitcoin peer-to-peer network surface: the wire codec, peer lifecycle and
 handshaking, inbound dispatch, connection management, and block-download
 policy (`DownloadWindow` and `BlockStager`).
 
+BIP157 basic-filter serving is optional and off by default. Node supplies an
+index-owned `CompactFilterQuery` only when `peerblockfilters` is enabled. Both
+handshake directions and the live service-flags view advertise `COMPACT_FILTERS`
+only while the index reports full readiness. Requests recheck readiness through
+the query, reuse block-inventory eligibility for their stop hash, and enforce the
+inclusive 1,000-filter / 2,000-hash limits. Filter blobs stream one at a time;
+message-slot and byte headroom are checked before each load. As with block
+serving, a saturated queue or an interrupted partial response closes that
+connection without discouragement rather than silently dropping the suffix.
+Callbacks never block waiting for a writer or retain a full range of blobs.
+Disabled serving retains the native ignore policy; enabled invalid types, hashes
+and ranges disconnect without discouragement, matching Core 31.1.
+
 Each `Peer` owns one connection's stream and handshake state. Live connections are
 identified by a `ConnectionId`, cleaned up through a `PeerLease`, and tracked with
 ready metadata by the shared `PeerTable`. Inbound accept and outbound connect

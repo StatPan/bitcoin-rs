@@ -261,6 +261,7 @@ pub enum ChainControlError {
     Failed(String),
 }
 
+pub use bitcoin_rs_index::query_api::{CompactFilterQuery, FilterQueryError};
 pub use bitcoin_rs_index::{
     DerivedIndexInfo, DerivedIndexQuery, ScriptHistoryRecord, ScriptIndexQuery, ScriptIndexRecord,
     ScriptIndexSnapshot, SpendingRecord, TxQueryError,
@@ -446,6 +447,8 @@ pub struct MempoolHandles {
 pub struct IndexHandles {
     /// Complete transaction-index query adapter.
     pub derived_index: Option<Arc<dyn DerivedIndexQuery>>,
+    /// Basic block-filter queries; present only when the capability is configured.
+    pub compact_filter: Option<Arc<dyn CompactFilterQuery>>,
     /// Generic script-index query adapter.
     pub script_index: Option<Arc<dyn ScriptIndexQuery>>,
     /// Complete transaction lookup used by Esplora output projections. It may
@@ -462,9 +465,6 @@ pub struct NetworkHandles {
     pub peer_table: Arc<bitcoin_rs_p2p::PeerTable>,
     /// P2P service runtime owner for network mutations and state.
     pub p2p: Arc<bitcoin_rs_p2p::P2pService>,
-    /// Service flags the node advertises, as resolved at P2P startup —
-    /// `NETWORK` on an unpruned node, `NETWORK_LIMITED` on a pruned one.
-    pub local_services: u64,
 }
 
 /// Mining capability handles.
@@ -603,7 +603,6 @@ impl Default for NetworkHandles {
         Self {
             peer_table: p2p.table(),
             p2p,
-            local_services: 0x09,
         }
     }
 }
@@ -1544,7 +1543,6 @@ mod tests {
             network: NetworkHandles {
                 peer_table: p2p.table(),
                 p2p: Arc::clone(&p2p),
-                local_services: 0x09,
             },
             ..ContextHandles::default()
         });
@@ -2108,6 +2106,7 @@ mod tests {
             },
             indexes: IndexHandles {
                 derived_index: None,
+                compact_filter: None,
                 esplora_tx_index: None,
                 script_index: None,
                 derived_index_status: Some(Arc::clone(&status)),

@@ -13,6 +13,8 @@ pub(crate) mod block_stager;
 pub(crate) mod chain_query;
 /// BIP152 compact-block reconstruction: bounded per-peer pending state.
 pub mod compact_blocks;
+/// Optional BIP157 basic-filter serving over the index-owned query capability.
+mod compact_filters;
 /// Bitcoin Core P2P compatibility inventory: pinned reference and command set.
 pub mod compat;
 /// Per-connection identity and cancellation.

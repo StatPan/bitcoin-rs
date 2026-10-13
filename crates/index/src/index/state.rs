@@ -1,14 +1,15 @@
 //! Coherent write fences and cooperative, versioned capability-reset recovery.
 
 use super::{
-    capability::IndexCapabilities, capability::IndexCapability, capability::IndexWatermark,
-    capability::IndexWatermarks, capability::SCRIPT_HISTORY_WATERMARK_KEY,
-    capability::SCRIPT_LIVE_WATERMARK_KEY, capability::TX_LOOKUP_WATERMARK_KEY,
-    capability::WATERMARK_LEN, error::IndexError,
+    capability::COMPACT_FILTER_WATERMARK_KEY, capability::IndexCapabilities,
+    capability::IndexCapability, capability::IndexWatermark, capability::IndexWatermarks,
+    capability::SCRIPT_HISTORY_WATERMARK_KEY, capability::SCRIPT_LIVE_WATERMARK_KEY,
+    capability::TX_LOOKUP_WATERMARK_KEY, capability::WATERMARK_LEN, error::IndexError,
 };
 use bitcoin_rs_storage::{
     BufferedWriteBatch, ColumnFamily, KvStore, PrefixScanLimit, WriteCondition,
 };
+use std::sync::Arc;
 use tracing::debug;
 
 // Reserved metadata keys in `ColumnFamily::UtxoMeta`. The 0x00 prefix is reserved for
@@ -17,8 +18,9 @@ pub(super) const FORMAT_VERSION_KEY: &[u8] = &[0x00, b'V'];
 
 /// On-disk format 5: big-endian height suffixes, 43-byte live rows with u24
 /// `vout`, and 6-byte `TxPosition` values. Any older marker refuses start
-/// (`UnsupportedTxIndexFormatVersion`) so the store fully resets and rebuilds
-/// from chainstate; no in-place upgrade path exists.
+/// (`UnsupportedTxIndexFormatVersion`) so legacy transaction/script families
+/// reset and rebuild from chainstate, preserving independently versioned filter
+/// records; no in-place upgrade path exists.
 pub(super) const FORMAT_VERSION_VALUE: [u8; 4] = [0x05, 0x00, 0x00, 0x00];
 
 /// Monotonic revision shared by every ordinary index mutation.
@@ -75,11 +77,38 @@ enum ResetState {
 /// the observation, so a reset that completed in between (idle version
 /// advanced, or state moved Absent -> Idle) rejects the stale write instead
 /// of silently re-adopting it.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct IndexWriteFence {
     state: IndexWriteFenceState,
     revision: Option<u64>,
     pub(super) watermarks: IndexWatermarks,
+    // Preserve malformed optional metadata as an exact CAS condition. Normal
+    // (valid or absent) filter cursors need no additional allocation to clone.
+    invalid_compact_filter_watermark: Option<Arc<[u8]>>,
+}
+
+impl IndexWriteFence {
+    /// Refuses filter mutations while preserving an opaque malformed filter cursor
+    /// in the exact fence used by otherwise healthy transaction/script writes.
+    pub(crate) fn check_compact_filter_watermark(&self) -> Result<(), IndexError> {
+        if self.invalid_compact_filter_watermark.is_some() {
+            Err(IndexError::InvalidCompactFilterWatermark)
+        } else {
+            Ok(())
+        }
+    }
+}
+
+fn decode_filter_watermark(
+    observed: Option<Vec<u8>>,
+) -> (Option<IndexWatermark>, Option<Arc<[u8]>>) {
+    match observed {
+        Some(bytes) => match IndexWatermark::from_bytes(&bytes) {
+            Ok(watermark) => (Some(watermark), None),
+            Err(_) => (None, Some(Arc::from(bytes))),
+        },
+        None => (None, None),
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -185,6 +214,8 @@ pub(super) fn capture_write_fence<S: KvStore>(
     let observed_script_history =
         snapshot.get(ColumnFamily::UtxoMeta, SCRIPT_HISTORY_WATERMARK_KEY)?;
     let observed_script_live = snapshot.get(ColumnFamily::UtxoMeta, SCRIPT_LIVE_WATERMARK_KEY)?;
+    let observed_compact_filter =
+        snapshot.get(ColumnFamily::UtxoMeta, COMPACT_FILTER_WATERMARK_KEY)?;
     drop(snapshot);
 
     let state = match observed_reset.as_deref() {
@@ -210,6 +241,8 @@ pub(super) fn capture_write_fence<S: KvStore>(
         },
     };
 
+    let (compact_filter, invalid_compact_filter_watermark) =
+        decode_filter_watermark(observed_compact_filter);
     let decoded: Result<(Option<u64>, IndexWatermarks), IndexError> = (|| {
         let revision = observed_revision
             .as_deref()
@@ -228,6 +261,7 @@ pub(super) fn capture_write_fence<S: KvStore>(
                 .as_deref()
                 .map(IndexWatermark::from_bytes)
                 .transpose()?,
+            compact_filter,
         };
         Ok((revision, watermarks))
     })();
@@ -238,6 +272,7 @@ pub(super) fn capture_write_fence<S: KvStore>(
         state,
         revision,
         watermarks,
+        invalid_compact_filter_watermark,
     })
 }
 
@@ -397,7 +432,7 @@ fn watermark_condition<'a>(
     }
 }
 
-/// Applies one ordinary batch under the coherent fence. Five exact conditions
+/// Applies one ordinary batch under the coherent fence. Six exact conditions
 /// fence the batch: reset state, ordinary revision, and all watermark rows.
 /// The commit also inserts the next revision. A lost race with an unchanged
 /// reset returns [`IndexError::StaleIndexState`]. A moved reset cooperatively
@@ -431,12 +466,25 @@ pub(super) fn commit_ordinary<S: KvStore>(
         .watermarks
         .script_live
         .map(|watermark| watermark.to_bytes());
+    let compact_filter = fence
+        .watermarks
+        .compact_filter
+        .map(|watermark| watermark.to_bytes());
+    let compact_filter_condition = match fence.invalid_compact_filter_watermark.as_deref() {
+        Some(expected) => WriteCondition::Equals {
+            cf: ColumnFamily::UtxoMeta,
+            key: COMPACT_FILTER_WATERMARK_KEY,
+            expected,
+        },
+        None => watermark_condition(compact_filter.as_ref(), COMPACT_FILTER_WATERMARK_KEY),
+    };
     let conditions = [
         reset_condition(&fence.state),
         revision_condition(fence.revision, &revision_bytes),
         watermark_condition(tx_lookup.as_ref(), TX_LOOKUP_WATERMARK_KEY),
         watermark_condition(script_history.as_ref(), SCRIPT_HISTORY_WATERMARK_KEY),
         watermark_condition(script_live.as_ref(), SCRIPT_LIVE_WATERMARK_KEY),
+        compact_filter_condition,
     ];
     if store.write_durable_if(&conditions, batch)? {
         return Ok(());
@@ -590,12 +638,16 @@ pub(super) fn resume_capability_reset<S: KvStore>(
         requested_mask = 0;
 
         let capabilities = IndexCapabilities::from_mask(work.mask)?;
-        let mut column_families: Vec<ColumnFamily> = capabilities
+        let mut prefixes: Vec<(ColumnFamily, &[u8])> = capabilities
             .iter()
             .flat_map(IndexCapability::column_families)
             .copied()
+            .map(|cf| (cf, &[][..]))
             .collect();
-        let unselected_cursor_remains = IndexCapability::ALL.into_iter().try_fold(
+        if capabilities.contains(IndexCapability::CompactFilter) {
+            prefixes.push((ColumnFamily::UtxoMeta, super::filter::FILTER_PREFIX));
+        }
+        let unselected_cursor_remains = IndexCapability::TX_SCRIPT.into_iter().try_fold(
             false,
             |remains, capability| -> Result<bool, IndexError> {
                 if remains || capabilities.contains(capability) {
@@ -606,8 +658,8 @@ pub(super) fn resume_capability_reset<S: KvStore>(
                     .is_some())
             },
         )?;
-        if !unselected_cursor_remains {
-            column_families.push(ColumnFamily::BlockHeaders);
+        if capabilities != IndexCapabilities::COMPACT_FILTER && !unselected_cursor_remains {
+            prefixes.push((ColumnFamily::BlockHeaders, &[]));
         }
 
         let revision_bytes = work.revision.unwrap_or(0).to_le_bytes();
@@ -616,9 +668,9 @@ pub(super) fn resume_capability_reset<S: KvStore>(
             revision_condition(work.revision, &revision_bytes),
         ];
         let mut claim_changed = false;
-        'families: for cf in column_families {
+        'families: for (cf, prefix) in prefixes {
             loop {
-                let scan = store.scan_prefix_bounded(cf, &[], RESET_SCAN_LIMIT)?;
+                let scan = store.scan_prefix_bounded(cf, prefix, RESET_SCAN_LIMIT)?;
                 if scan.rows.is_empty() {
                     if scan.complete {
                         break;
@@ -655,6 +707,58 @@ pub(super) fn resume_capability_reset<S: KvStore>(
         );
         if store.write_durable_if(&conditions, completion)? {
             return Ok(());
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn valid_or_absent_filter_watermarks_need_no_opaque_allocation() {
+        assert_eq!(decode_filter_watermark(None), (None, None));
+        let watermark = IndexWatermark {
+            height: 9,
+            hash: [3; 32],
+        };
+        assert_eq!(
+            decode_filter_watermark(Some(watermark.to_bytes().to_vec())),
+            (Some(watermark), None)
+        );
+    }
+
+    #[test]
+    fn malformed_filter_watermark_fence_clones_share_exact_opaque_bytes() {
+        let bytes = vec![7; 1024];
+        let (compact_filter, invalid_compact_filter_watermark) =
+            decode_filter_watermark(Some(bytes.clone()));
+        let fence = IndexWriteFence {
+            state: IndexWriteFenceState::Absent,
+            revision: None,
+            watermarks: IndexWatermarks {
+                compact_filter,
+                ..IndexWatermarks::default()
+            },
+            invalid_compact_filter_watermark,
+        };
+        let cloned = fence.clone();
+        assert_eq!(fence, cloned);
+        assert_eq!(
+            fence.invalid_compact_filter_watermark.as_deref(),
+            Some(bytes.as_slice())
+        );
+        assert!(matches!(
+            cloned.check_compact_filter_watermark(),
+            Err(IndexError::InvalidCompactFilterWatermark)
+        ));
+        if let (Some(original), Some(cloned)) = (
+            fence.invalid_compact_filter_watermark,
+            cloned.invalid_compact_filter_watermark,
+        ) {
+            assert!(Arc::ptr_eq(&original, &cloned));
+        } else {
+            panic!("malformed cursor must remain in the fence");
         }
     }
 }

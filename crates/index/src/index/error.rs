@@ -11,7 +11,7 @@ pub enum IndexError {
     Storage(#[from] StorageError),
     #[error("invalid serialized block: {0:?}")]
     BlockParse(bitcoin_rs_primitives::DecodeError),
-    #[error("a watermark anchor cannot cover ScriptLive or an empty capability set")]
+    #[error("a watermark anchor can cover only body-derived historical capabilities")]
     AnchorUnsupportedSelection,
     #[error("invalid block header length {len}")]
     InvalidHeaderLength { len: usize },
@@ -53,6 +53,20 @@ pub enum IndexError {
         vout: u32,
         height: u32,
     },
+    #[error("compact filter construction failed: {0}")]
+    CompactFilterBuild(#[from] crate::compact_filter::CompactFilterError),
+    #[error("compact filter record is missing at height {height} ({hash:?})")]
+    MissingCompactFilter { height: u32, hash: [u8; 32] },
+    #[error("compact filter chain anchor unavailable at height {height} ({hash:?})")]
+    CompactFilterChainUnavailable { height: u32, hash: [u8; 32] },
+    #[error("unsupported compact filter record version {version}")]
+    UnsupportedCompactFilterVersion { version: u8 },
+    #[error("invalid compact filter watermark encoding")]
+    InvalidCompactFilterWatermark,
+    #[error("invalid compact filter record")]
+    InvalidCompactFilterRecord,
+    #[error("compact filter record conflicts at height {height} ({hash:?})")]
+    ConflictingCompactFilter { height: u32, hash: [u8; 32] },
     #[error("ScriptLive is already seeded; reset the capability first")]
     LiveAlreadySeeded,
     #[error("TxIndex tables are present without a versioned watermark")]
@@ -71,4 +85,20 @@ pub enum IndexError {
     StateRevisionOverflow,
     #[error("TxIndex state changed; discard derived state and re-derive")]
     StaleIndexState,
+}
+
+impl IndexError {
+    /// Whether this is an optional-filter failure rather than a store failure.
+    pub(crate) const fn is_compact_filter_error(&self) -> bool {
+        matches!(
+            self,
+            Self::CompactFilterBuild(_)
+                | Self::MissingCompactFilter { .. }
+                | Self::CompactFilterChainUnavailable { .. }
+                | Self::UnsupportedCompactFilterVersion { .. }
+                | Self::InvalidCompactFilterRecord
+                | Self::InvalidCompactFilterWatermark
+                | Self::ConflictingCompactFilter { .. }
+        )
+    }
 }

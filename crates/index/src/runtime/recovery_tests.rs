@@ -37,8 +37,8 @@ use super::*;
 
 type BodyMap = HashMap<(u32, [u8; 32]), Vec<u8>>;
 
-struct MapBodyStore {
-    bodies: Mutex<BodyMap>,
+pub(super) struct MapBodyStore {
+    pub(super) bodies: Mutex<BodyMap>,
 }
 
 impl BlockBodyStore for MapBodyStore {
@@ -114,15 +114,15 @@ fn mine_block(prev_hash: Hash256, height: u32, extra: i64) -> (Block, Hash256) {
 
 /// Genesis with two rival branches: `A` (`extra = 0`) and `B` (`extra = 1`),
 /// each `len` blocks long. Every body is present in the store.
-struct ForkFixture {
+pub(super) struct ForkFixture {
     tree: Arc<RwLock<BlockTree>>,
-    bodies: Arc<MapBodyStore>,
-    a: Vec<(NodeId, Hash256)>,
-    b: Vec<(NodeId, Hash256)>,
+    pub(super) bodies: Arc<MapBodyStore>,
+    pub(super) a: Vec<(NodeId, Hash256)>,
+    pub(super) b: Vec<(NodeId, Hash256)>,
 }
 
 impl ForkFixture {
-    fn new(len: u32) -> Self {
+    pub(super) fn new(len: u32) -> Self {
         let mut tree = BlockTree::new();
         let mut bodies = BodyMap::new();
         let (genesis, genesis_hash) = mine_block(Hash256::from_le_bytes(&[0_u8; 32]), 0, 0);
@@ -155,7 +155,7 @@ impl ForkFixture {
         }
     }
 
-    fn tip(&self, (node_id, _): (NodeId, Hash256)) -> Arc<TipSnapshot> {
+    pub(super) fn tip(&self, (node_id, _): (NodeId, Hash256)) -> Arc<TipSnapshot> {
         let tree = self.tree.read();
         let node = tree.node(node_id).expect("node");
         Arc::new(TipSnapshot {
@@ -168,15 +168,16 @@ impl ForkFixture {
     }
 }
 
-struct Harness {
+pub(super) struct Harness {
     _index_dir: tempfile::TempDir,
-    writer: Arc<dyn TxIndexWriter>,
+    pub(super) store: Arc<FjallStore>,
+    pub(super) writer: Arc<dyn TxIndexWriter>,
     applied_tip: Arc<ArcSwapOption<TipSnapshot>>,
-    runtime: Arc<DerivedIndexRuntime>,
+    pub(super) runtime: Arc<DerivedIndexRuntime>,
     evidence: Arc<RecordedIndexAhead>,
     /// The pruning authority this worker reads through.
     retention: Arc<RetentionRegistry>,
-    worker: Worker,
+    pub(super) worker: Worker,
 }
 
 impl Harness {
@@ -188,7 +189,7 @@ impl Harness {
         )
     }
 
-    fn with_enabled(
+    pub(super) fn with_enabled(
         fixture: &ForkFixture,
         rollback_rebuild_cutover: u32,
         enabled: IndexCapabilities,
@@ -196,7 +197,7 @@ impl Harness {
         let index_dir = tempfile::tempdir().expect("index dir");
         let store = Arc::new(FjallStore::open(index_dir.path()).expect("fjall open"));
         let writer: Arc<dyn TxIndexWriter> = Arc::new(parking_lot::RwLock::new(
-            crate::IndexWriter::open(store, 1).expect("index writer open"),
+            crate::IndexWriter::open(Arc::clone(&store), 1).expect("index writer open"),
         ));
         let applied_tip = Arc::new(ArcSwapOption::empty());
         let (wake_tx, wake_rx) = crossbeam_channel::bounded(16);
@@ -231,6 +232,7 @@ impl Harness {
         };
         Self {
             _index_dir: index_dir,
+            store,
             writer,
             applied_tip,
             runtime,
@@ -240,24 +242,29 @@ impl Harness {
         }
     }
 
-    fn set_tip(&self, tip: &Arc<TipSnapshot>) {
+    pub(super) fn set_tip(&self, tip: &Arc<TipSnapshot>) {
         self.applied_tip.store(Some(Arc::clone(tip)));
     }
 
     /// Runs passes until the worker reports `CaughtUp`, bounded so a
     /// non-converging worker fails the test instead of hanging it.
-    fn settle(&self, pending: &mut Option<PendingForward>) {
+    #[track_caller]
+    pub(super) fn settle(&self, pending: &mut Option<PendingForward>) {
         for _ in 0..64 {
             match self.worker.reconcile_once(pending).expect("reconcile pass") {
                 ReconcileAction::CaughtUp => return,
                 ReconcileAction::Progressed | ReconcileAction::Buffered => {}
-                ReconcileAction::Stalled => panic!("worker stalled"),
+                ReconcileAction::Stalled => panic!(
+                    "worker stalled: filter={:?}, watermarks={:?}",
+                    self.runtime.compact_filter_unavailable(),
+                    self.watermarks()
+                ),
             }
         }
         panic!("worker did not converge");
     }
 
-    fn watermarks(&self) -> IndexWatermarks {
+    pub(super) fn watermarks(&self) -> IndexWatermarks {
         self.writer.fenced_watermarks().expect("watermarks").1
     }
 

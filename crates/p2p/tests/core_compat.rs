@@ -235,6 +235,7 @@ fn dispatch_collect(
         message,
         chain,
         None,
+        None,
         &|| true,
         &|| true,
         &mut |response| {
@@ -780,6 +781,7 @@ fn block_relay_only_dial_is_prohibited_from_transaction_relay() -> Result<(), Bo
         blocks_tx,
         None,
         None,
+        None,
         ListenerExtras::default(),
     );
     let dial = spawn_outbound_connection(addr, shared, PeerRole::BlockRelayOnly);
@@ -1147,6 +1149,7 @@ fn serve_and_handshake_over_tcp(network: Network, magic: Magic) -> Result<(), Bo
         blocks_tx,
         None,
         None,
+        None,
         ListenerExtras::default(),
     );
 
@@ -1279,6 +1282,7 @@ fn outbound_shared(peer_table: Arc<PeerTable>, magic: Magic) -> ConnectionShared
         magic,
         headers_tx,
         blocks_tx,
+        None,
         None,
         None,
         ListenerExtras::default(),

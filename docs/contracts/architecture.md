@@ -54,6 +54,12 @@ Crate names use the `bitcoin-rs-` prefix except for the `bitcoin-rs` binary.
     `p2p`, `rpc`, `node`, or the binary. Admission retains peer attribution
     as data without owning connections or runtime assembly. The
     `g17_dependency_direction` gate checks this boundary explicitly.
+    `p2p` consumes `index::CompactFilterQuery` for optional BIP157 serving,
+    with index default features disabled. This same-layer read capability keeps
+    durable filters and readiness with index and peer request/queue policy with
+    P2P; node supplies the optional handle. It introduces neither a storage
+    backend selection nor a second index lifecycle in P2P. The dependency
+    direction and cycle gates continue to forbid a reverse `index` to `p2p` edge.
     `p2p` also consumes chainstate-owned historical progress, window-failure
     dispositions and reorg outcomes, without enabling backend features. Node
     retains transition settlement and follower dispatch; P2P consumes these

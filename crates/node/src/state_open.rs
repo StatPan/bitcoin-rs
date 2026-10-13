@@ -266,7 +266,10 @@ impl NodeState {
                 derived_index_parts
                     .as_ref()
                     .map(|(runtime, _, _, _)| Arc::clone(runtime)),
-                derived_index_capabilities(&config),
+                config
+                    .indexes
+                    .script_index
+                    .enabled_capabilities(config.indexes.txindex),
             ));
         // Two outbound populations: full-relay slots carry transactions,
         // addresses, and blocks; block-relay-only slots carry blocks alone.
@@ -277,51 +280,65 @@ impl NodeState {
         } else {
             P2P_OUTBOUND_FULL_RELAY_SLOTS
         };
-        let p2p = Arc::new(bitcoin_rs_p2p::P2pService::new(
-            bitcoin_rs_p2p::P2pServiceConfig {
-                listen_addrs: config.p2p.listen.clone(),
-                address_book_path: Some(config.data_dir.join("peers.dat")),
-                asmap_path: config.p2p.asmap.clone(),
-                allow_local_addresses: config.network == bitcoin_rs_primitives::Network::Regtest,
-                magic: bitcoin::p2p::Magic::from_bytes(config.p2p.magic),
-                dns_seeds_enabled: config.p2p.dns_seeds_enabled,
-                dns_seeds: config
-                    .network
-                    .dns_seeds()
-                    .iter()
-                    .map(|seed| (*seed).to_owned())
-                    .collect(),
-                dns_port: config.network.default_p2p_port(),
-                fixed_peers: config.p2p.connect.clone(),
-                noban_subnets: config.p2p.noban_subnets.clone(),
-                outbound_full_relay_slots,
-                outbound_block_relay_slots: P2P_OUTBOUND_BLOCK_RELAY_SLOTS,
-                outbound_queue_limit: outbound_full_relay_slots,
-                inbound_block_queue_limit: INBOUND_BLOCK_CHANNEL_LIMIT,
-                // A pruned node cannot serve the full block history, so it
-                // advertises `NODE_NETWORK_LIMITED` instead of
-                // `NODE_NETWORK` (Core `init.cpp:2022-2026`); witness relay
-                // is unaffected.
-                local_services: {
-                    let history = if config.storage.prune_target_mb > 0 {
-                        bitcoin::p2p::ServiceFlags::WITNESS
-                            | bitcoin::p2p::ServiceFlags::NETWORK_LIMITED
-                    } else {
-                        bitcoin::p2p::ServiceFlags::WITNESS | bitcoin::p2p::ServiceFlags::NETWORK
-                    };
-                    // BIP324: a v2-capable node advertises it, as Core does
-                    // whenever `-v2transport` is on.
-                    if config.p2p.v2_transport {
-                        history | bitcoin::p2p::ServiceFlags::P2P_V2
-                    } else {
-                        history
-                    }
+        let compact_filters = if config.p2p.peer_block_filters {
+            derived_index_parts.as_ref().map(|(_, _, _, adapter)| {
+                let query: Arc<dyn bitcoin_rs_index::query_api::CompactFilterQuery> =
+                    adapter.clone();
+                query
+            })
+        } else {
+            None
+        };
+        let p2p = Arc::new(
+            bitcoin_rs_p2p::P2pService::new(
+                bitcoin_rs_p2p::P2pServiceConfig {
+                    listen_addrs: config.p2p.listen.clone(),
+                    address_book_path: Some(config.data_dir.join("peers.dat")),
+                    asmap_path: config.p2p.asmap.clone(),
+                    allow_local_addresses: config.network
+                        == bitcoin_rs_primitives::Network::Regtest,
+                    magic: bitcoin::p2p::Magic::from_bytes(config.p2p.magic),
+                    dns_seeds_enabled: config.p2p.dns_seeds_enabled,
+                    dns_seeds: config
+                        .network
+                        .dns_seeds()
+                        .iter()
+                        .map(|seed| (*seed).to_owned())
+                        .collect(),
+                    dns_port: config.network.default_p2p_port(),
+                    fixed_peers: config.p2p.connect.clone(),
+                    noban_subnets: config.p2p.noban_subnets.clone(),
+                    outbound_full_relay_slots,
+                    outbound_block_relay_slots: P2P_OUTBOUND_BLOCK_RELAY_SLOTS,
+                    outbound_queue_limit: outbound_full_relay_slots,
+                    inbound_block_queue_limit: INBOUND_BLOCK_CHANNEL_LIMIT,
+                    // A pruned node cannot serve the full block history, so it
+                    // advertises `NODE_NETWORK_LIMITED` instead of
+                    // `NODE_NETWORK` (Core `init.cpp:2022-2026`); witness relay
+                    // is unaffected.
+                    local_services: {
+                        let history = if config.storage.prune_target_mb > 0 {
+                            bitcoin::p2p::ServiceFlags::WITNESS
+                                | bitcoin::p2p::ServiceFlags::NETWORK_LIMITED
+                        } else {
+                            bitcoin::p2p::ServiceFlags::WITNESS
+                                | bitcoin::p2p::ServiceFlags::NETWORK
+                        };
+                        // BIP324: a v2-capable node advertises it, as Core does
+                        // whenever `-v2transport` is on.
+                        if config.p2p.v2_transport {
+                            history | bitcoin::p2p::ServiceFlags::P2P_V2
+                        } else {
+                            history
+                        }
+                    },
+                    v2_transport: config.p2p.v2_transport,
+                    ..bitcoin_rs_p2p::P2pServiceConfig::default()
                 },
-                v2_transport: config.p2p.v2_transport,
-                ..bitcoin_rs_p2p::P2pServiceConfig::default()
-            },
-            chainstate.shutdown_reader(),
-        ));
+                chainstate.shutdown_reader(),
+            )
+            .with_compact_filters(compact_filters),
+        );
         let peer_table = p2p.table();
         let inbound_headers_rx = p2p
             .take_inbound_headers_receiver()

@@ -438,6 +438,20 @@ impl NodeState {
         })
     }
 
+    /// Returns only the configured basic-filter query capability.
+    #[must_use]
+    pub fn compact_filter_query(
+        &self,
+    ) -> Option<Arc<dyn bitcoin_rs_index::query_api::CompactFilterQuery>> {
+        if !self.config.indexes.block_filter_index {
+            return None;
+        }
+        self.derived_index.adapter().map(|adapter| {
+            let query: Arc<dyn bitcoin_rs_index::query_api::CompactFilterQuery> = adapter.clone();
+            query
+        })
+    }
+
     /// Starts the derived-index workers. Call only once the applied tip is
     /// authoritative — after crash recovery — so the index reconciles against
     /// the real chainstate and never mistakes a recovered gap for a stale branch.
@@ -472,10 +486,15 @@ impl NodeState {
 }
 
 fn derived_index_capabilities(config: &NodeConfig) -> bitcoin_rs_index::IndexCapabilities {
-    config
+    let legacy = config
         .indexes
         .script_index
-        .enabled_capabilities(config.indexes.txindex)
+        .enabled_capabilities(config.indexes.txindex);
+    if config.indexes.block_filter_index {
+        legacy.union(bitcoin_rs_index::IndexCapabilities::COMPACT_FILTER)
+    } else {
+        legacy
+    }
 }
 
 fn build_derived_index_open_spec(

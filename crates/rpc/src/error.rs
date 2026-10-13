@@ -134,3 +134,33 @@ impl From<crate::context::TxQueryError> for RpcError {
         }
     }
 }
+
+impl From<crate::context::FilterQueryError> for RpcError {
+    /// Keeps unavailable coverage distinct from missing blocks and storage failures.
+    fn from(error: crate::context::FilterQueryError) -> Self {
+        use crate::context::FilterQueryError;
+
+        match error {
+            FilterQueryError::Disabled => {
+                Self::Misc("Index is not enabled for filtertype basic".to_owned())
+            }
+            FilterQueryError::UnknownBlock => {
+                Self::InvalidAddressOrKey("Block not found".to_owned())
+            }
+            FilterQueryError::NotConnected => Self::InvalidAddressOrKey(
+                "Filter not found. Block was not connected to active chain.".to_owned(),
+            ),
+            FilterQueryError::Indexing => Self::Misc(
+                "Filter not found. Block filters are still in the process of being indexed."
+                    .to_owned(),
+            ),
+            FilterQueryError::Retry | FilterQueryError::Unavailable(_) => {
+                Self::Misc(error.to_string())
+            }
+            FilterQueryError::InvalidRange => Self::InvalidParameter(error.to_string()),
+            FilterQueryError::Corrupt(_) | FilterQueryError::Storage(_) => {
+                Self::Internal(error.to_string())
+            }
+        }
+    }
+}

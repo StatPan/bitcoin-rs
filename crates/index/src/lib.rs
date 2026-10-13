@@ -6,6 +6,8 @@ pub mod block_log;
 pub use block_log::{BlockLog, BlockLogReader, BlockRecord};
 /// Core-compatible capability status projection.
 mod capabilities;
+/// BIP158 basic-filter construction from validated blocks and spent scripts.
+pub mod compact_filter;
 /// Confirmed block indexing over the workspace key-value store.
 mod index;
 /// Derived-index query contracts shared with surface adapters.
@@ -27,10 +29,11 @@ pub use capabilities::{
 };
 pub(crate) use index::NoSpentScripts;
 pub use index::{
-    BlockSource, ConsumerCursorUpdate, IndexCapabilities, IndexCapability, IndexError, IndexReader,
-    IndexRowCounts, IndexWatermark, IndexWatermarks, IndexWriteFence, IndexWriter, Indexer,
-    MAX_LIVE_SCRIPT_SIZE, PreparedBatch, PreparedBatchLimits, PreparedBlock, ScriptHistoryEntry,
-    ScriptLiveScan, SpentCoinScripts, TxIndexScan, TxIndexScanRow, TxIndexSnapshot,
+    BlockSource, CompactFilterMetadata, CompactFilterRecord, ConsumerCursorUpdate,
+    IndexCapabilities, IndexCapability, IndexError, IndexReader, IndexRowCounts, IndexWatermark,
+    IndexWatermarks, IndexWriteFence, IndexWriter, Indexer, MAX_LIVE_SCRIPT_SIZE, PreparedBatch,
+    PreparedBatchLimits, PreparedBlock, ScriptHistoryEntry, ScriptLiveScan, SpentCoinScripts,
+    TxIndexScan, TxIndexScanRow, TxIndexSnapshot,
 };
 pub use query_api::{
     DerivedIndexInfo, DerivedIndexQuery, RollbackWarningSource, ScriptHistoryRecord,

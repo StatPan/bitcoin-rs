@@ -28,6 +28,7 @@ redb = [
 ]
 
 [dependencies]
+bitcoin.workspace = true
 bitcoin-rs-primitives.workspace = true
 bitcoin-rs-storage = { workspace = true, default-features = false }
 bitcoin-rs-chain.workspace = true
@@ -51,7 +52,6 @@ proptest.workspace = true
 serde_json.workspace = true
 criterion.workspace = true
 tempfile.workspace = true
-bitcoin.workspace = true
 
 [[bench]]
 name = "history_resolve"

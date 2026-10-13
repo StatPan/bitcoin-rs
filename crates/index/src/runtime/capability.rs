@@ -50,7 +50,7 @@ impl DerivedIndexCapability {
             }
             DerivedIndexLifecycle::Serving(engine) => engine,
         };
-        let phase = runtime.phase();
+        let phase = runtime.phase().for_capabilities(enabled);
         if let Some((from_height, to_height)) = phase.rolling_back() {
             return CapabilityState::RollingBack {
                 from_height,

@@ -291,6 +291,7 @@ fn wiring(
         blocks_tx,
         None,
         None,
+        None,
         ListenerExtras::default(),
     )
 }

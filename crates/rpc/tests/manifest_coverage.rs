@@ -85,8 +85,8 @@ fn every_unimplemented_rpc_row_answers_method_not_found() {
         "Unimplemented set must not silently empty out"
     );
     assert!(
-        unimplemented.contains("getblockfilter"),
-        "Core's getblockfilter must remain inventoried without claiming filter-index support"
+        unimplemented.contains("scanblocks"),
+        "Core's scanblocks must remain inventoried without claiming filter-scanning support"
     );
     for name in &unimplemented {
         assert!(
